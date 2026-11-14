@@ -1,11 +1,12 @@
 import type { Request, Response } from "express";
 import { and, eq, ne } from "drizzle-orm";
 import { APIError } from "better-auth/api";
+import { fromNodeHeaders } from "better-auth/node";
 import { auth } from "../auth.js";
 import { db } from "../db/index.js";
 import { member, session, user } from "../db/schema.js";
 import { getClinicMembers, getPendingInvitations } from "../lib/clinicTeam.js";
-import { isClinicRole } from "../lib/permissions.js";
+import { isClinicRole, type ClinicRole } from "../lib/permissions.js";
 
 const frontendUrl = process.env.FRONTEND_URL ?? "http://localhost:5173";
 
@@ -20,7 +21,11 @@ export const getTeam = async (req: Request, res: Response) => {
   res.json({ members, invitations });
 };
 
-// Owners and admins: add an existing user to the active clinic
+// Owners and admins: add someone to the active clinic.
+// - New email: the account is created and joins right away (they get a link
+//   to choose their password).
+// - Existing account: it belongs to someone who may already work elsewhere, so
+//   they get an invitation and join only if they accept it
 export const addMember = async (req: Request, res: Response) => {
   const clinicId = req.clinicId!;
   const { email: rawEmail, name, role } = req.body ?? {};
@@ -55,7 +60,7 @@ export const addMember = async (req: Request, res: Response) => {
 
   try {
     // 1. Does the user exist?
-    let [targetUser] = await db
+    const [targetUser] = await db
       .select({ id: user.id })
       .from(user)
       .where(eq(user.email, email))
@@ -75,36 +80,44 @@ export const addMember = async (req: Request, res: Response) => {
         });
         return;
       }
+
+      // Invite instead of adding: Better Auth checks the inviter's rights
+      // (only an owner can invite an owner) and emails the invitation.
+      // resend: inviting again just resends the pending one
+      await auth.api.createInvitation({
+        headers: fromNodeHeaders(req.headers),
+        body: { email, role, organizationId: clinicId, resend: true },
+      });
+
+      const invitations = await getPendingInvitations(clinicId);
+      const invitation = invitations.find((i) => i.email.toLowerCase() === email);
+
+      res.status(201).json({ invited: true, invitation });
+      return;
     }
 
-    // 3. If it doesn't exist, create it without a password.
+    // 3. New email: create the account without a password.
     // Server-side call (no headers): skips the admin plugin's super-admin check.
-    const isNewUser = !targetUser;
-    if (!targetUser) {
-      const { user: createdUser } = await auth.api.createUser({
-        body: { email, name: name?.trim() || email.split("@")[0]! },
-      });
-      targetUser = { id: createdUser.id };
-    }
+    const { user: createdUser } = await auth.api.createUser({
+      body: { email, name: name?.trim() || email.split("@")[0]! },
+    });
 
     // 4. Create the membership (permissions were checked by requireActiveClinic)
     await auth.api.addMember({
-      body: { userId: targetUser.id, role, organizationId: clinicId },
+      body: { userId: createdUser.id, role, organizationId: clinicId },
     });
 
-    // 5. New users get a link to choose their password. Resetting it also
-    // creates their email/password account.
-    if (isNewUser) {
-      await auth.api.requestPasswordReset({
-        body: { email, redirectTo: `${frontendUrl}/reset-password` },
-      });
-    }
+    // 5. They get a link to choose their password. Resetting it also creates
+    // their email/password account.
+    await auth.api.requestPasswordReset({
+      body: { email, redirectTo: `${frontendUrl}/reset-password` },
+    });
 
     // Return the new member in the same shape as getTeam
     const members = await getClinicMembers(clinicId);
-    const created = members.find((m) => m.userId === targetUser.id);
+    const created = members.find((m) => m.userId === createdUser.id);
 
-    res.status(201).json({ member: created, userCreated: isNewUser });
+    res.status(201).json({ invited: false, member: created });
   } catch (error) {
     if (error instanceof APIError) {
       res.status(error.statusCode).json({
@@ -209,6 +222,9 @@ export const removeMember = async (req: Request<MemberParams>, res: Response) =>
 const MIN_PASSWORD_LENGTH = 10;
 const MAX_PASSWORD_LENGTH = 128;
 
+// Whose password owners and admins can set (mirrored in the frontend's MemberActions)
+const PASSWORD_MANAGEABLE_ROLES: readonly ClinicRole[] = ["physio", "receptionist"];
+
 // POST /clinic/team/members/:memberId/password   body: { newPassword }
 // Sets a new password and logs them out everywhere, so they must use it
 export const setMemberPassword = async (req: Request<MemberParams>, res: Response) => {
@@ -230,6 +246,18 @@ export const setMemberPassword = async (req: Request<MemberParams>, res: Respons
 
   const target = await findManageableMember(req, res);
   if (!target) return;
+
+  // Only staff without management rights: an admin can't take over another
+  // admin's account (they'd get the same rights plus that person's identity)
+  if (!PASSWORD_MANAGEABLE_ROLES.includes(target.role as ClinicRole)) {
+    res.status(403).json({
+      error: {
+        code: "PASSWORD_NOT_MANAGEABLE",
+        message: "Solo puedes cambiar la contraseña de fisioterapeutas y recepcionistas",
+      },
+    });
+    return;
+  }
 
   // A password belongs to the person, not to the clinic. If they also work in
   // another clinic (or are a super-admin), one clinic's admin shouldn't be able
