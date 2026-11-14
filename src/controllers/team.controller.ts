@@ -1,0 +1,274 @@
+import type { Request, Response } from "express";
+import { and, eq, ne } from "drizzle-orm";
+import { APIError } from "better-auth/api";
+import { auth } from "../auth.js";
+import { db } from "../db/index.js";
+import { member, session, user } from "../db/schema.js";
+import { getClinicMembers, getPendingInvitations } from "../lib/clinicTeam.js";
+import { isClinicRole } from "../lib/permissions.js";
+
+const frontendUrl = process.env.FRONTEND_URL ?? "http://localhost:5173";
+
+export const getTeam = async (req: Request, res: Response) => {
+  const clinicId = req.clinicId!;
+
+  const [members, invitations] = await Promise.all([
+    getClinicMembers(clinicId),
+    getPendingInvitations(clinicId),
+  ]);
+
+  res.json({ members, invitations });
+};
+
+// Owners and admins: add an existing user to the active clinic
+export const addMember = async (req: Request, res: Response) => {
+  const clinicId = req.clinicId!;
+  const { email: rawEmail, name, role } = req.body ?? {};
+
+  if (typeof rawEmail !== "string" || !rawEmail.includes("@")) {
+    res.status(400).json({
+      error: { code: "INVALID_EMAIL", message: "El email no es válido" },
+    });
+    return;
+  }
+  if (name !== undefined && (typeof name !== "string" || !name.trim())) {
+    res.status(400).json({
+      error: { code: "INVALID_NAME", message: "El nombre no es válido" },
+    });
+    return;
+  }
+  if (!isClinicRole(role)) {
+    res.status(400).json({
+      error: { code: "INVALID_ROLE", message: "El rol no es válido" },
+    });
+    return;
+  }
+  // Only an owner can make someone else an owner
+  if (role === "owner" && req.clinicRole !== "owner") {
+    res.status(403).json({
+      error: { code: "FORBIDDEN", message: "Solo un propietario puede añadir otro propietario" },
+    });
+    return;
+  }
+
+  const email = rawEmail.trim().toLowerCase();
+
+  try {
+    // 1. Does the user exist?
+    let [targetUser] = await db
+      .select({ id: user.id })
+      .from(user)
+      .where(eq(user.email, email))
+      .limit(1);
+
+    // 2. If it exists, is it already a member of this clinic?
+    if (targetUser) {
+      const [existingMember] = await db
+        .select({ id: member.id })
+        .from(member)
+        .where(and(eq(member.organizationId, clinicId), eq(member.userId, targetUser.id)))
+        .limit(1);
+
+      if (existingMember) {
+        res.status(409).json({
+          error: { code: "ALREADY_A_MEMBER", message: "Este usuario ya pertenece a la clínica" },
+        });
+        return;
+      }
+    }
+
+    // 3. If it doesn't exist, create it without a password.
+    // Server-side call (no headers): skips the admin plugin's super-admin check.
+    const isNewUser = !targetUser;
+    if (!targetUser) {
+      const { user: createdUser } = await auth.api.createUser({
+        body: { email, name: name?.trim() || email.split("@")[0]! },
+      });
+      targetUser = { id: createdUser.id };
+    }
+
+    // 4. Create the membership (permissions were checked by requireActiveClinic)
+    await auth.api.addMember({
+      body: { userId: targetUser.id, role, organizationId: clinicId },
+    });
+
+    // 5. New users get a link to choose their password. Resetting it also
+    // creates their email/password account.
+    if (isNewUser) {
+      await auth.api.requestPasswordReset({
+        body: { email, redirectTo: `${frontendUrl}/reset-password` },
+      });
+    }
+
+    // Return the new member in the same shape as getTeam
+    const members = await getClinicMembers(clinicId);
+    const created = members.find((m) => m.userId === targetUser.id);
+
+    res.status(201).json({ member: created, userCreated: isNewUser });
+  } catch (error) {
+    if (error instanceof APIError) {
+      res.status(error.statusCode).json({
+        error: { code: error.body?.code ?? "ADD_MEMBER_FAILED", message: error.message },
+      });
+      return;
+    }
+    throw error;
+  }
+};
+
+// ---------- Managing an existing member (owners and admins) ----------
+
+type MemberParams = { memberId: string };
+
+// The member to act on, or null after sending the error. They must belong to
+// the session's active clinic (never trust a clinic id from the request), and
+// can't be the owner (ownership only changes by invitation) or yourself
+async function findManageableMember(req: Request<MemberParams>, res: Response) {
+  const [target] = await db
+    .select({
+      memberId: member.id,
+      userId: member.userId,
+      role: member.role,
+      name: user.name,
+      platformRole: user.role,
+    })
+    .from(member)
+    .innerJoin(user, eq(member.userId, user.id))
+    .where(and(eq(member.id, req.params.memberId), eq(member.organizationId, req.clinicId!)))
+    .limit(1);
+
+  if (!target) {
+    res.status(404).json({
+      error: { code: "MEMBER_NOT_FOUND", message: "Este miembro no pertenece a tu clínica" },
+    });
+    return null;
+  }
+  if (target.role === "owner") {
+    res.status(403).json({
+      error: {
+        code: "CANNOT_MANAGE_OWNER",
+        message: "El propietario solo se puede cambiar con una invitación",
+      },
+    });
+    return null;
+  }
+  if (target.userId === req.user!.id) {
+    res.status(403).json({
+      error: { code: "CANNOT_MANAGE_SELF", message: "No puedes hacer esto sobre ti mismo" },
+    });
+    return null;
+  }
+  return target;
+}
+
+// PATCH /clinic/team/members/:memberId/role   body: { role }
+export const updateMemberRole = async (req: Request<MemberParams>, res: Response) => {
+  const { role } = req.body ?? {};
+
+  if (!isClinicRole(role) || role === "owner") {
+    res.status(400).json({
+      error: {
+        code: "INVALID_ROLE",
+        message: "El rol debe ser admin, receptionist o physio",
+      },
+    });
+    return;
+  }
+
+  const target = await findManageableMember(req, res);
+  if (!target) return;
+
+  await db.update(member).set({ role }).where(eq(member.id, target.memberId));
+
+  const members = await getClinicMembers(req.clinicId!);
+  res.json({ member: members.find((m) => m.memberId === target.memberId) });
+};
+
+// DELETE /clinic/team/members/:memberId
+// Takes them out of this clinic only: their account and other clinics stay
+export const removeMember = async (req: Request<MemberParams>, res: Response) => {
+  const target = await findManageableMember(req, res);
+  if (!target) return;
+
+  await db.transaction(async (tx) => {
+    await tx.delete(member).where(eq(member.id, target.memberId));
+    // If they were working in this clinic, their sessions stop pointing to it
+    // (next time they'll have to pick another clinic, or see they have none)
+    await tx
+      .update(session)
+      .set({ activeOrganizationId: null })
+      .where(
+        and(eq(session.userId, target.userId), eq(session.activeOrganizationId, req.clinicId!)),
+      );
+  });
+
+  res.status(204).end();
+};
+
+// Same limits as Better Auth (auth.ts emailAndPassword + its default maximum)
+const MIN_PASSWORD_LENGTH = 10;
+const MAX_PASSWORD_LENGTH = 128;
+
+// POST /clinic/team/members/:memberId/password   body: { newPassword }
+// Sets a new password and logs them out everywhere, so they must use it
+export const setMemberPassword = async (req: Request<MemberParams>, res: Response) => {
+  const { newPassword } = req.body ?? {};
+
+  if (
+    typeof newPassword !== "string" ||
+    newPassword.length < MIN_PASSWORD_LENGTH ||
+    newPassword.length > MAX_PASSWORD_LENGTH
+  ) {
+    res.status(400).json({
+      error: {
+        code: "INVALID_PASSWORD",
+        message: `La contraseña debe tener entre ${MIN_PASSWORD_LENGTH} y ${MAX_PASSWORD_LENGTH} caracteres`,
+      },
+    });
+    return;
+  }
+
+  const target = await findManageableMember(req, res);
+  if (!target) return;
+
+  // A password belongs to the person, not to the clinic. If they also work in
+  // another clinic (or are a super-admin), one clinic's admin shouldn't be able
+  // to change it: they can use "forgot password" instead
+  const [otherClinic] = await db
+    .select({ id: member.id })
+    .from(member)
+    .where(and(eq(member.userId, target.userId), ne(member.organizationId, req.clinicId!)))
+    .limit(1);
+
+  if (otherClinic || target.platformRole === "superadmin") {
+    res.status(403).json({
+      error: {
+        code: "PASSWORD_NOT_MANAGEABLE",
+        message: `${target.name} también trabaja en otra clínica. Puede cambiar su contraseña con «He olvidado mi contraseña».`,
+      },
+    });
+    return;
+  }
+
+  // Same steps as Better Auth's own "set password": hash it, then update the
+  // email/password account, or create it if they only had Google
+  const ctx = await auth.$context;
+  const hash = await ctx.password.hash(newPassword);
+  const credentialAccount = await ctx.internalAdapter.findCredentialAccount(target.userId);
+
+  if (credentialAccount) {
+    await ctx.internalAdapter.updatePassword(target.userId, hash);
+  } else {
+    await ctx.internalAdapter.linkAccount({
+      userId: target.userId,
+      providerId: "credential",
+      accountId: target.userId,
+      password: hash,
+    });
+  }
+
+  // Log them out everywhere: the old password (and its sessions) stop working
+  await ctx.internalAdapter.deleteUserSessions(target.userId);
+
+  res.status(204).end();
+};
