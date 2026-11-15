@@ -123,7 +123,8 @@ export const createClinic = async (req: Request, res: Response) => {
       email: ownerInvitation.email,
       role: "owner",
       clinicName: clinic.name,
-      inviterName: req.user!.name,
+      inviter: { name: req.user!.name, email: req.user!.email },
+      sentBy: "platform",
     });
 
     res.status(201).json({ clinic });
@@ -283,7 +284,8 @@ export const createInvitation = async (
       email: normalizedEmail,
       role,
       clinicName: clinic.name,
-      inviterName: req.user!.name,
+      inviter: { name: req.user!.name, email: req.user!.email },
+      sentBy: "platform",
     });
 
     res.status(201).json({ invitation: created });
@@ -348,7 +350,8 @@ export const resendInvitation = async (
       email: found.email,
       role: found.role ?? "member",
       clinicName: found.clinicName,
-      inviterName: req.user!.name,
+      inviter: { name: req.user!.name, email: req.user!.email },
+      sentBy: "platform",
     });
 
     res.json({ invitation: updated });

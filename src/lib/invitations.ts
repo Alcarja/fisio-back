@@ -1,4 +1,4 @@
-import { sendEmail } from "./email.js";
+import { clinicSender, platformSender, sendTemplate } from "./email/index.js";
 
 const frontendUrl = process.env.FRONTEND_URL ?? "http://localhost:5173";
 
@@ -12,22 +12,34 @@ export const invitationExpiryDate = () =>
 export const invitationUrl = (invitationId: string) =>
   `${frontendUrl}/accept-invitation/${invitationId}`;
 
+// sentBy "clinic": an owner or admin invited a colleague, so the email comes
+// from the clinic and answers go to them. "platform": a super-admin invited a
+// clinic's owner, so it comes from the platform
 export async function sendInvitationEmail({
   invitationId,
   email,
   role,
   clinicName,
-  inviterName,
+  inviter,
+  sentBy,
 }: {
   invitationId: string;
   email: string;
   role: string;
   clinicName: string;
-  inviterName: string;
+  inviter: { name: string; email: string };
+  sentBy: "clinic" | "platform";
 }) {
-  await sendEmail(
+  await sendTemplate(
+    "invitation",
     email,
-    `You're invited to join ${clinicName}`,
-    `${inviterName} invited you as ${role}. Accept: ${invitationUrl(invitationId)}`,
+    {
+      clinicName,
+      inviterName: sentBy === "clinic" ? inviter.name : platformSender.name,
+      role,
+      url: invitationUrl(invitationId),
+      expiresInDays: INVITATION_EXPIRES_IN_SECONDS / (60 * 60 * 24),
+    },
+    sentBy === "clinic" ? clinicSender(clinicName, inviter.email) : platformSender,
   );
 }

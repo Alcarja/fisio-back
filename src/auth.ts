@@ -6,7 +6,7 @@ import { admin, organization } from "better-auth/plugins";
 import { and, eq, gt } from "drizzle-orm";
 import { db } from "./db/index.js";
 import * as schema from "./db/schema.js";
-import { sendEmail } from "./lib/email.js";
+import { clinicSender, getWelcomeContext, sendTemplate } from "./lib/email/index.js";
 import { INVITATION_EXPIRES_IN_SECONDS, sendInvitationEmail } from "./lib/invitations.js";
 import { replacePreviousOwners } from "./lib/ownership.js";
 import {
@@ -83,7 +83,20 @@ export const auth = betterAuth({
     // (e.g. with an old or leaked password) is logged out
     revokeSessionsOnPasswordReset: true,
     sendResetPassword: async ({ user, url }) => {
-      await sendEmail(user.email, "Reset your password", `Reset link: ${url}`);
+      // Members just created by a clinic get its welcome email instead
+      // (team.controller.ts → addMember → withWelcomeEmail)
+      const welcome = getWelcomeContext();
+      if (welcome) {
+        const { replyTo, ...data } = welcome;
+        await sendTemplate(
+          "welcome",
+          user.email,
+          { ...data, name: user.name, url },
+          clinicSender(data.clinicName, replyTo),
+        );
+        return;
+      }
+      await sendTemplate("resetPassword", user.email, { name: user.name, url });
     },
   },
 
@@ -132,7 +145,8 @@ export const auth = betterAuth({
           email,
           role,
           clinicName: organization.name,
-          inviterName: inviter.user.name,
+          inviter: { name: inviter.user.name, email: inviter.user.email },
+          sentBy: "clinic",
         });
       },
       organizationHooks: {

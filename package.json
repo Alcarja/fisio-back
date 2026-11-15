@@ -13,7 +13,8 @@
     "auth:generate": "auth generate --config src/auth.ts --output src/db/auth-schema.ts --yes",
     "db:seed": "tsx src/db/seed.ts",
     "db:seed:clinic": "tsx src/db/seed-clinic.ts",
-    "db:constraints": "tsx src/db/apply-constraints.ts"
+    "db:constraints": "tsx src/db/apply-constraints.ts",
+    "email:test": "tsx src/scripts/send-test-email.ts"
   },
   "keywords": [],
   "author": "",

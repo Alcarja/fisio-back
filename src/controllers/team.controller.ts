@@ -4,7 +4,8 @@ import { APIError } from "better-auth/api";
 import { fromNodeHeaders } from "better-auth/node";
 import { auth } from "../auth.js";
 import { db } from "../db/index.js";
-import { member, session, user } from "../db/schema.js";
+import { member, organization, session, user } from "../db/schema.js";
+import { withWelcomeEmail } from "../lib/email/index.js";
 import { getClinicMembers, getPendingInvitations } from "../lib/clinicTeam.js";
 import { isClinicRole, type ClinicRole } from "../lib/permissions.js";
 
@@ -107,11 +108,26 @@ export const addMember = async (req: Request, res: Response) => {
       body: { userId: createdUser.id, role, organizationId: clinicId },
     });
 
-    // 5. They get a link to choose their password. Resetting it also creates
-    // their email/password account.
-    await auth.api.requestPasswordReset({
-      body: { email, redirectTo: `${frontendUrl}/reset-password` },
-    });
+    // 5. They get the clinic's welcome email with a link to choose their
+    // password. Resetting it also creates their email/password account.
+    const [clinic] = await db
+      .select({ name: organization.name })
+      .from(organization)
+      .where(eq(organization.id, clinicId))
+      .limit(1);
+
+    await withWelcomeEmail(
+      {
+        clinicName: clinic?.name ?? "tu clínica",
+        inviterName: req.user!.name,
+        role,
+        replyTo: req.user!.email,
+      },
+      () =>
+        auth.api.requestPasswordReset({
+          body: { email, redirectTo: `${frontendUrl}/reset-password` },
+        }),
+    );
 
     // Return the new member in the same shape as getTeam
     const members = await getClinicMembers(clinicId);
