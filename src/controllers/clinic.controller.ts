@@ -2,12 +2,13 @@ import type { Request, Response } from "express";
 import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import { generateId } from "better-auth";
 import { db } from "../db/index.js";
-import { invitation, member, organization, user } from "../db/schema.js";
+import { clinicFeature, invitation, member, organization, user } from "../db/schema.js";
 import {
   getClinicMembers,
   getPendingInvitations,
   invitationColumns,
 } from "../lib/clinicTeam.js";
+import { CLINIC_FEATURES, getClinicFeatures, isClinicFeature } from "../lib/features.js";
 import { invitationExpiryDate, sendInvitationEmail } from "../lib/invitations.js";
 import { CLINIC_ROLES, isClinicRole } from "../lib/permissions.js";
 
@@ -155,12 +156,75 @@ export const getClinicById = async (
     return;
   }
 
-  const [members, invitations] = await Promise.all([
+  const [members, invitations, features] = await Promise.all([
     getClinicMembers(clinicId),
     getPendingInvitations(clinicId),
+    getClinicFeatures(clinicId),
   ]);
 
-  res.json({ clinic: { ...clinic, members, invitations } });
+  res.json({ clinic: { ...clinic, members, invitations, features } });
+};
+
+// Super-admin only: switch an optional feature on or off for a clinic.
+// PUT /admin/clinics/:clinicId/features/:feature   body: { enabled: boolean }
+// Answers with the clinic's features after the change. Repeating it changes nothing.
+export const setClinicFeature = async (
+  req: Request<{ clinicId: string; feature: string }>,
+  res: Response,
+) => {
+  const { clinicId, feature } = req.params;
+  const { enabled } = req.body ?? {};
+
+  if (!isClinicFeature(feature)) {
+    res.status(400).json({
+      error: {
+        code: "INVALID_FEATURE",
+        message: `La funcionalidad debe ser una de: ${CLINIC_FEATURES.join(", ")}`,
+      },
+    });
+    return;
+  }
+  if (typeof enabled !== "boolean") {
+    res.status(400).json({
+      error: { code: "INVALID_ENABLED", message: "enabled debe ser true o false" },
+    });
+    return;
+  }
+
+  try {
+    const [clinic] = await db
+      .select({ id: organization.id })
+      .from(organization)
+      .where(eq(organization.id, clinicId))
+      .limit(1);
+
+    if (!clinic) {
+      res.status(404).json({
+        error: { code: "CLINIC_NOT_FOUND", message: "La clínica no existe" },
+      });
+      return;
+    }
+
+    if (enabled) {
+      await db
+        .insert(clinicFeature)
+        .values({ organizationId: clinicId, feature, enabledBy: req.user!.id })
+        .onConflictDoNothing();
+    } else {
+      await db
+        .delete(clinicFeature)
+        .where(
+          and(eq(clinicFeature.organizationId, clinicId), eq(clinicFeature.feature, feature)),
+        );
+    }
+
+    res.json({ features: await getClinicFeatures(clinicId) });
+  } catch (error) {
+    console.error("setClinicFeature failed:", error);
+    res.status(500).json({
+      error: { code: "INTERNAL_ERROR", message: "No se pudo cambiar la funcionalidad" },
+    });
+  }
 };
 
 // Super-admin only: invite someone to a clinic, e.g. a new owner after the

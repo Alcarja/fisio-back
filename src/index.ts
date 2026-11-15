@@ -40,6 +40,11 @@ app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
     res.status(400).json({ error: { code: "INVALID_JSON", message: "El cuerpo no es JSON válido" } });
     return;
   }
+  // An uploaded file over the route's limit
+  if ((error as { type?: string })?.type === "entity.too.large") {
+    res.status(413).json({ error: { code: "FILE_TOO_LARGE", message: "El archivo pesa demasiado" } });
+    return;
+  }
   console.error(`${req.method} ${req.originalUrl} failed:`, error);
   if (res.headersSent) return;
   res.status(500).json({

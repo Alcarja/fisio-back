@@ -8,6 +8,7 @@ import scheduleRoutes from "./schedule.routes.js";
 import roomRoutes from "./room.routes.js";
 import serviceRoutes from "./service.routes.js";
 import calendarRoutes from "./calendar.routes.js";
+import patientRoutes from "./patient.routes.js";
 import reportRoutes from "./report.routes.js";
 import billingRoutes from "./billing.routes.js";
 import contactRoutes from "./contact.routes.js";
@@ -28,6 +29,7 @@ router.use("/clinic/settings/schedule", scheduleRoutes);
 router.use("/clinic/settings/rooms", roomRoutes);
 router.use("/clinic/settings/services", serviceRoutes);
 router.use("/clinic/calendar", calendarRoutes);
+router.use("/clinic/patients", patientRoutes);
 router.use("/clinic/reports", reportRoutes);
 
 export default router;

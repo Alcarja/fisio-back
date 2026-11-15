@@ -10,6 +10,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { organization, user } from "./auth-schema.js";
+import { patient } from "./patient-schema.js";
 import { room } from "./room-schema.js";
 import { service } from "./service-schema.js";
 
@@ -89,8 +90,9 @@ export const attendanceStatus = pgEnum("attendance_status", [
 ]);
 
 // Una fila por paciente y cita (varias en las sesiones en grupo).
-// Sin ficha de paciente por ahora: nombre y apellidos escritos a mano.
-// Cuando llegue la sección de pacientes, se añade aquí un patient_id opcional.
+// patientId apunta a la ficha del paciente (patient-schema.ts). Es null cuando
+// la cita se da solo con nombre y apellidos, sin ficha, y en las de fichas
+// borradas: por eso el nombre y los apellidos se guardan también aquí.
 export const appointmentPatient = pgTable(
   "appointment_patient",
   {
@@ -102,6 +104,7 @@ export const appointmentPatient = pgTable(
     organizationId: text("organization_id")
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
+    patientId: uuid("patient_id").references(() => patient.id, { onDelete: "set null" }),
     firstName: text("first_name").notNull(),
     lastName: text("last_name").notNull(),
     attendance: attendanceStatus("attendance").notNull().default("pending"),
@@ -110,6 +113,8 @@ export const appointmentPatient = pgTable(
   (table) => [
     index("appointment_patient_appointment_idx").on(table.appointmentId),
     index("appointment_patient_org_idx").on(table.organizationId),
+    // Historial de citas de un paciente
+    index("appointment_patient_patient_idx").on(table.patientId),
   ],
 );
 

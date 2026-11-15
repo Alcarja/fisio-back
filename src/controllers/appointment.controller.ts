@@ -1,11 +1,12 @@
 import type { Request, Response } from "express";
-import { and, asc, eq, gte, inArray, lt } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   appointment,
   appointmentEvent,
   appointmentPatient,
   member,
+  patient,
   room,
   service,
   user,
@@ -28,7 +29,11 @@ import { addDaysIso, utcToZoned, zonedToUtc } from "../lib/timezone.js";
 type AppointmentStatus = "booked" | "confirmed" | "completed" | "no_show" | "cancelled";
 const STATUSES: AppointmentStatus[] = ["booked", "confirmed", "completed", "no_show", "cancelled"];
 
-type PatientInput = { firstName: string; lastName: string };
+// A patient of an appointment: an existing ficha (patientId), or just the names
+// of someone without ficha (kept only on the appointment; no ficha is created)
+type PatientInput = { patientId: string } | { firstName: string; lastName: string };
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Who can change any appointment of the clinic. Everyone else (physios) can see
 // them all but only change their own (where they are the physio)
@@ -41,18 +46,66 @@ const send = (res: Response, status: number, code: string, message: string) =>
 const notFound = (res: Response) =>
   send(res, 404, "APPOINTMENT_NOT_FOUND", "Esta cita no existe en tu clínica");
 
-// [{ firstName, lastName }], each with both names. null if invalid
+// [{ patientId } | { firstName, lastName }]: a ficha, or both names for someone
+// without one. The same ficha can't be twice in an appointment. null if invalid
 function parsePatients(value: unknown): PatientInput[] | null {
   if (!Array.isArray(value)) return null;
   const patients: PatientInput[] = [];
+  const seen = new Set<string>();
   for (const p of value) {
+    if (p?.patientId !== undefined && p.patientId !== null) {
+      if (typeof p.patientId !== "string" || !UUID_PATTERN.test(p.patientId)) return null;
+      if (seen.has(p.patientId)) return null;
+      seen.add(p.patientId);
+      patients.push({ patientId: p.patientId });
+      continue;
+    }
     const firstName = typeof p?.firstName === "string" ? p.firstName.trim() : "";
     const lastName = typeof p?.lastName === "string" ? p.lastName.trim() : "";
-    if (!firstName || !lastName) return null;
+    if (!firstName || !lastName || firstName.length > 100 || lastName.length > 100) return null;
     patients.push({ firstName, lastName });
   }
   return patients;
 }
+
+type Names = { firstName: string; lastName: string };
+
+// The fichas the patients point at, by id. null if one isn't this clinic's
+async function loadFichas(clinicId: string, patients: PatientInput[]) {
+  const ids = patients.flatMap((p) => ("patientId" in p ? [p.patientId] : []));
+  const fichas = new Map<string, Names>();
+  if (ids.length === 0) return fichas;
+  const rows = await db
+    .select({ id: patient.id, firstName: patient.firstName, lastName: patient.lastName })
+    .from(patient)
+    .where(and(eq(patient.organizationId, clinicId), inArray(patient.id, ids)));
+  for (const { id, ...names } of rows) fichas.set(id, names);
+  return fichas.size === ids.length ? fichas : null;
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+// Saves an appointment's patients. Those with a ficha are linked to it, and its
+// names are copied to the appointment too (they stay if the ficha is deleted).
+// Those sent by name are saved as written, without ficha
+async function insertAppointmentPatients(
+  tx: Tx,
+  ids: { clinicId: string; appointmentId: string },
+  patients: PatientInput[],
+  fichas: Map<string, Names>,
+) {
+  const { clinicId: organizationId, appointmentId } = ids;
+  await tx.insert(appointmentPatient).values(
+    patients.map((p) =>
+      "patientId" in p
+        ? { ...fichas.get(p.patientId)!, patientId: p.patientId, appointmentId, organizationId }
+        : { ...p, appointmentId, organizationId },
+    ),
+  );
+}
+
+const INVALID_PATIENTS = "Cada paciente necesita nombre y apellidos, y no puede estar repetido";
+const UNKNOWN_PATIENT = "Alguno de los pacientes no existe en tu clínica";
 
 const optionalText = (value: unknown) =>
   typeof value === "string" && value.trim() ? value.trim() : null;
@@ -107,11 +160,15 @@ async function loadAppointments(
     .select({
       id: appointmentPatient.id,
       appointmentId: appointmentPatient.appointmentId,
-      firstName: appointmentPatient.firstName,
-      lastName: appointmentPatient.lastName,
+      // null: no ficha (appointment from before fichas, or ficha deleted)
+      patientId: appointmentPatient.patientId,
+      // The ficha's current name; the copy on the appointment if there's none
+      firstName: sql<string>`coalesce(${patient.firstName}, ${appointmentPatient.firstName})`,
+      lastName: sql<string>`coalesce(${patient.lastName}, ${appointmentPatient.lastName})`,
       attendance: appointmentPatient.attendance,
     })
     .from(appointmentPatient)
+    .leftJoin(patient, eq(appointmentPatient.patientId, patient.id))
     .where(
       and(
         // Always filtered by clinic: patients' names are personal data
@@ -201,7 +258,7 @@ async function loadAppointments(
       physio: { userId: r.physioId, name: r.physioName },
       patients: patients
         .filter((p) => p.appointmentId === r.id)
-        .map(({ id, firstName, lastName, attendance }) => ({ id, firstName, lastName, attendance })),
+        .map(({ appointmentId: _appointmentId, ...p }) => p),
       // Empty when everything is fine
       issues,
     };
@@ -249,8 +306,10 @@ export const listAppointments = async (req: Request, res: Response) => {
 // ---------- Create ----------
 
 // POST /clinic/calendar/appointments -> 201 { appointment }
-// body: { serviceId, roomId, physioId, date, startTime, patients: [{ firstName, lastName }],
+// body: { serviceId, roomId, physioId, date, startTime,
+//         patients: [{ patientId } | { firstName, lastName }],
 //         status?: "booked" | "confirmed", notes? }
+// Patients sent by name are kept on the appointment only, without ficha
 export const createAppointment = async (req: Request, res: Response) => {
   const clinicId = req.clinicId!;
   const { serviceId, roomId, physioId, date, startTime, status = "booked", notes } = req.body ?? {};
@@ -265,9 +324,9 @@ export const createAppointment = async (req: Request, res: Response) => {
     return send(res, 400, "INVALID_STATUS", "Una cita nueva solo puede estar reservada o confirmada");
   }
   const patients = parsePatients(req.body?.patients);
-  if (!patients) {
-    return send(res, 400, "INVALID_PATIENTS", "Cada paciente necesita nombre y apellidos");
-  }
+  if (!patients) return send(res, 400, "INVALID_PATIENTS", INVALID_PATIENTS);
+  const fichas = await loadFichas(clinicId, patients);
+  if (!fichas) return send(res, 400, "PATIENT_NOT_FOUND", UNKNOWN_PATIENT);
   // Physios only book their own appointments
   if (!canManageAll(req) && physioId !== req.user!.id) {
     return send(res, 403, "ONLY_OWN_APPOINTMENTS", "Solo puedes crear citas para ti");
@@ -310,9 +369,12 @@ export const createAppointment = async (req: Request, res: Response) => {
         })
         .returning({ id: appointment.id });
 
-      await tx
-        .insert(appointmentPatient)
-        .values(patients.map((p) => ({ ...p, appointmentId: created!.id, organizationId: clinicId })));
+      await insertAppointmentPatients(
+        tx,
+        { clinicId, appointmentId: created!.id },
+        patients,
+        fichas,
+      );
 
       await tx.insert(appointmentEvent).values({
         appointmentId: created!.id,
@@ -373,9 +435,9 @@ export const updateAppointment = async (
     return send(res, 400, "INVALID_STATUS", "El estado no es válido");
   }
   const patients = body.patients !== undefined ? parsePatients(body.patients) : undefined;
-  if (patients === null) {
-    return send(res, 400, "INVALID_PATIENTS", "Cada paciente necesita nombre y apellidos");
-  }
+  if (patients === null) return send(res, 400, "INVALID_PATIENTS", INVALID_PATIENTS);
+  const fichas = patients ? await loadFichas(clinicId, patients) : undefined;
+  if (fichas === null) return send(res, 400, "PATIENT_NOT_FOUND", UNKNOWN_PATIENT);
 
   // The appointment after the change
   const next = {
@@ -486,9 +548,12 @@ export const updateAppointment = async (
 
       if (patients) {
         await tx.delete(appointmentPatient).where(eq(appointmentPatient.appointmentId, appointmentId));
-        await tx
-          .insert(appointmentPatient)
-          .values(patients.map((p) => ({ ...p, appointmentId, organizationId: clinicId })));
+        await insertAppointmentPatients(
+          tx,
+          { clinicId, appointmentId },
+          patients,
+          fichas!,
+        );
       }
 
       const events: (typeof appointmentEvent.$inferInsert)[] = [];
