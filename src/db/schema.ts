@@ -9,3 +9,6 @@ export * from "./appointment-schema.js";
 
 // Pagos de las clínicas (super-admin)
 export * from "./billing-schema.js";
+
+// Solicitudes de contacto de la web pública
+export * from "./contact-schema.js";

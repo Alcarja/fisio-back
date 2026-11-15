@@ -14,6 +14,10 @@ const HOST = process.env.HOST || "127.0.0.1";
 // Don't advertise the framework in every response
 app.disable("x-powered-by");
 
+// The API only listens on 127.0.0.1, behind nginx: trust the visitor IP that
+// nginx sends in X-Forwarded-For (used by the contact form's limit per IP)
+app.set("trust proxy", "loopback");
+
 app.use(
   cors({
     origin: process.env.FRONTEND_URL ?? "http://localhost:5173",

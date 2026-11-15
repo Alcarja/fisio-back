@@ -127,4 +127,50 @@ function resetPassword(data: ResetPasswordData): RenderedEmail {
   };
 }
 
-export const templates = { invitation, welcome, resetPassword };
+// ---------- New contact request (to the Kineflow team) ----------
+
+export type ContactRequestData = {
+  name: string;
+  email: string;
+  clinicName: string;
+  phone: string | null;
+  teamSize: string | null;
+  message: string | null;
+};
+
+function contactRequest(data: ContactRequestData): RenderedEmail {
+  const subject = `Nueva solicitud: ${data.clinicName}`;
+  // Answering is one click: the email's Reply-To is the person who wrote
+  const button = { label: `Responder a ${data.name}`, url: `mailto:${data.email}` };
+  const rows: [string, string | null][] = [
+    ["Nombre", data.name],
+    ["Email", data.email],
+    ["Clínica", data.clinicName],
+    ["Teléfono", data.phone],
+    ["Equipo", data.teamSize],
+  ];
+  const filled = rows.filter((r): r is [string, string] => !!r[1]);
+
+  return {
+    subject,
+    html: renderLayout({
+      preheader: `${data.name} quiere probar Kineflow en ${data.clinicName}.`,
+      heading: "Nueva solicitud de contacto",
+      paragraphs: [
+        filled.map(([k, v]) => `<strong>${k}:</strong> ${e(v)}`).join("<br>"),
+        ...(data.message ? [e(data.message).replace(/\n/g, "<br>")] : []),
+      ],
+      button,
+    }),
+    text: renderText(
+      [
+        "Nueva solicitud de contacto",
+        filled.map(([k, v]) => `${k}: ${v}`).join("\n"),
+        ...(data.message ? [data.message] : []),
+      ],
+      button,
+    ),
+  };
+}
+
+export const templates = { invitation, welcome, resetPassword, contactRequest };

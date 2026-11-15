@@ -10,6 +10,8 @@ import serviceRoutes from "./service.routes.js";
 import calendarRoutes from "./calendar.routes.js";
 import reportRoutes from "./report.routes.js";
 import billingRoutes from "./billing.routes.js";
+import contactRoutes from "./contact.routes.js";
+import contactAdminRoutes from "./contact-admin.routes.js";
 
 const router = Router();
 
@@ -17,7 +19,9 @@ router.use("/", healthRoutes);
 router.use("/", meRoutes);
 router.use("/admin/clinics", clinicRoutes);
 router.use("/admin/billing", billingRoutes);
+router.use("/admin/contact-requests", contactAdminRoutes);
 router.use("/invitations", invitationRoutes);
+router.use("/contact", contactRoutes);
 // The active clinic (from the session): clinic users, by role
 router.use("/clinic/team", teamRoutes);
 router.use("/clinic/settings/schedule", scheduleRoutes);
