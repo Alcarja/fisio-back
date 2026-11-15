@@ -1,5 +1,5 @@
 import "dotenv/config";
-import express from "express";
+import express, { type NextFunction, type Request, type Response } from "express";
 import cors from "cors";
 import { toNodeHandler } from "better-auth/node";
 import { auth } from "./auth.js";
@@ -7,6 +7,12 @@ import routes from "./routes/index.js";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
+// Only reachable from this machine (nginx proxies /api/ to it). Set HOST=0.0.0.0
+// only if something outside the server must call the API directly
+const HOST = process.env.HOST || "127.0.0.1";
+
+// Don't advertise the framework in every response
+app.disable("x-powered-by");
 
 app.use(
   cors({
@@ -21,6 +27,22 @@ app.all("/api/auth/*splat", toNodeHandler(auth));
 app.use(express.json());
 app.use("/api", routes);
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+// Anything that throws ends here: full details in the server log, a generic
+// message to the browser (never a stack trace or a database error)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
+  // Malformed JSON body: the client's fault, not ours
+  if ((error as { type?: string })?.type === "entity.parse.failed") {
+    res.status(400).json({ error: { code: "INVALID_JSON", message: "El cuerpo no es JSON válido" } });
+    return;
+  }
+  console.error(`${req.method} ${req.originalUrl} failed:`, error);
+  if (res.headersSent) return;
+  res.status(500).json({
+    error: { code: "INTERNAL_ERROR", message: "Algo ha fallado. Inténtalo de nuevo." },
+  });
+});
+
+app.listen(PORT, HOST, () => {
+  console.log(`Server running on http://${HOST}:${PORT}`);
 });

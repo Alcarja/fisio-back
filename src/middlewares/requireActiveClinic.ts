@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { member } from "../db/schema.js";
+import { member, organization } from "../db/schema.js";
 import { isClinicRole, type ClinicRole } from "../lib/permissions.js";
 
 // Use after requireAuth, on every endpoint that works with a clinic's data.
@@ -9,6 +9,9 @@ import { isClinicRole, type ClinicRole } from "../lib/permissions.js";
 // The clinic always comes from the session's active clinic (chosen in the
 // frontend's clinic switcher), never from the URL or the body, so nobody can
 // reach another clinic's data by changing an id.
+//
+// Inactive clinics (deactivated by a super-admin) are closed to everyone: the
+// frontend hides them, and this stops calls made straight to the API.
 //
 // On success: req.clinicId and req.clinicRole are set.
 export function requireActiveClinic(allowedRoles: readonly ClinicRole[]) {
@@ -24,14 +27,22 @@ export function requireActiveClinic(allowedRoles: readonly ClinicRole[]) {
 
     try {
       const [membership] = await db
-        .select({ role: member.role })
+        .select({ role: member.role, clinicStatus: organization.status })
         .from(member)
+        .innerJoin(organization, eq(member.organizationId, organization.id))
         .where(and(eq(member.organizationId, clinicId), eq(member.userId, req.user!.id)))
         .limit(1);
 
       if (!membership || !isClinicRole(membership.role)) {
         res.status(403).json({
           error: { code: "NOT_A_MEMBER", message: "No perteneces a esta clínica" },
+        });
+        return;
+      }
+
+      if (membership.clinicStatus === "inactive") {
+        res.status(403).json({
+          error: { code: "CLINIC_INACTIVE", message: "Esta clínica está desactivada" },
         });
         return;
       }

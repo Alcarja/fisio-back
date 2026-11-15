@@ -66,6 +66,17 @@ async function requireInvitationForSignUp(request: Request | undefined, rawEmail
   }
 }
 
+// Read from the database, not the user object Better Auth passes along, so it
+// doesn't depend on which fields that object includes
+async function isSuperAdmin(userId: string) {
+  const [found] = await db
+    .select({ role: schema.user.role })
+    .from(schema.user)
+    .where(eq(schema.user.id, userId))
+    .limit(1);
+  return found?.role === "superadmin";
+}
+
 const googleConfigured =
   !!process.env.GOOGLE_CLIENT_ID && !!process.env.GOOGLE_CLIENT_SECRET;
 
@@ -83,6 +94,16 @@ export const auth = betterAuth({
     // (e.g. with an old or leaked password) is logged out
     revokeSessionsOnPasswordReset: true,
     sendResetPassword: async ({ user, url }) => {
+      // Super-admins never get a reset link: whoever got into their inbox would
+      // control the whole platform. The page still says "check your email", so
+      // nobody can tell the address belongs to a super-admin. They change it in
+      // Mi cuenta (needs the current one) or on the server:
+      // npm run db:seed -- --reset-password (src/db/seed.ts)
+      if (await isSuperAdmin(user.id)) {
+        console.warn(`Password reset requested for super-admin ${user.email}: not sent`);
+        return;
+      }
+
       // Members just created by a clinic get its welcome email instead
       // (team.controller.ts → addMember → withWelcomeEmail)
       const welcome = getWelcomeContext();
@@ -106,14 +127,43 @@ export const auth = betterAuth({
         google: {
           clientId: process.env.GOOGLE_CLIENT_ID!,
           clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+          // Google only logs in existing accounts. Without this, anyone with a
+          // Google account could create one, skipping the invitation rule above
+          disableImplicitSignUp: true,
         },
       }
     : {},
+
+  // Limits how often one IP can call the auth endpoints (guessing passwords,
+  // flooding inboxes with reset emails). Better Auth only turns it on when
+  // NODE_ENV=production; here it's always on, so a missing NODE_ENV on the
+  // server can't leave the login unprotected.
+  // Behind nginx the IP comes from X-Forwarded-For (set it in the proxy config)
+  rateLimit: {
+    enabled: true,
+    window: 60,
+    max: 100,
+    customRules: {
+      "/sign-in/email": { window: 60, max: 5 },
+      "/request-password-reset": { window: 60, max: 3 },
+      "/reset-password": { window: 60, max: 5 },
+      "/change-password": { window: 60, max: 5 },
+      "/sign-up/email": { window: 60, max: 5 },
+    },
+  },
 
   hooks: {
     before: createAuthMiddleware(async (ctx) => {
       if (ctx.path === "/sign-up/email") {
         await requireInvitationForSignUp(ctx.request, ctx.body?.email);
+      }
+      // There's no photo upload yet: a free URL could point to any server and
+      // log the IP of every colleague who sees the avatar
+      if (ctx.path === "/update-user" && ctx.body?.image !== undefined) {
+        throw new APIError("BAD_REQUEST", {
+          code: "IMAGE_NOT_ALLOWED",
+          message: "La foto de perfil todavía no se puede cambiar",
+        });
       }
     }),
   },

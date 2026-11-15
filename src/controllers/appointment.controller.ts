@@ -14,6 +14,7 @@ import {
   PROFESSIONAL_ROLES,
   appointmentIssues,
   checkAppointmentRules,
+  loadParts,
   isPhysioOverlapError,
 } from "../lib/appointments.js";
 import { loadExceptions, loadTimezone, loadWeeklyHours } from "../lib/clinicSchedule.js";
@@ -207,14 +208,21 @@ async function loadAppointments(
   });
 }
 
-async function serviceDuration(serviceId: string) {
+// Always called after the service was checked to be this clinic's; the clinic
+// filter is a second lock
+async function serviceDuration(clinicId: string, serviceId: string) {
   const [svc] = await db
     .select({ durationMinutes: service.durationMinutes })
     .from(service)
-    .where(eq(service.id, serviceId))
+    .where(and(eq(service.id, serviceId), eq(service.organizationId, clinicId)))
     .limit(1);
-  return svc!.durationMinutes;
+  if (!svc) throw new Error(`Service ${serviceId} not found in clinic ${clinicId}`);
+  return svc.durationMinutes;
 }
+
+// Longest range one request can ask for (the calendar asks for a week, the
+// reports for a month): stops anyone loading years of appointments at once
+const MAX_RANGE_DAYS = 62;
 
 // ---------- List ----------
 
@@ -224,6 +232,10 @@ export const listAppointments = async (req: Request, res: Response) => {
   const { from, to } = req.query;
   if (!isIsoDate(from) || !isIsoDate(to) || to < from) {
     return send(res, 400, "INVALID_RANGE", "from y to deben ser fechas AAAA-MM-DD, y to no anterior a from");
+  }
+  const days = (Date.parse(to) - Date.parse(from)) / 86_400_000 + 1;
+  if (days > MAX_RANGE_DAYS) {
+    return send(res, 400, "RANGE_TOO_LONG", `Como máximo ${MAX_RANGE_DAYS} días por consulta`);
   }
 
   const timeZone = await loadTimezone(clinicId);
@@ -276,7 +288,9 @@ export const createAppointment = async (req: Request, res: Response) => {
   });
   if (ruleError) return send(res, ruleError.status, ruleError.code, ruleError.message);
 
-  const endsAt = new Date(startsAt.getTime() + (await serviceDuration(serviceId)) * 60000);
+  const endsAt = new Date(
+    startsAt.getTime() + (await serviceDuration(clinicId, serviceId)) * 60000,
+  );
 
   try {
     const id = await db.transaction(async (tx) => {
@@ -420,9 +434,26 @@ export const updateAppointment = async (
       excludeAppointmentId: appointmentId,
     });
     if (ruleError) return send(res, ruleError.status, ruleError.code, ruleError.message);
+  } else if (slotChanged) {
+    // Cancelled appointments skip the rules above (they don't occupy time), but
+    // a changed service, room or physio must still be this clinic's. Otherwise
+    // it could point at another clinic's data and show its names here.
+    // Unchanged ones stay as they are even if since deactivated or gone (history)
+    const { svc, rm, professional } = await loadParts(clinicId, next);
+    if (next.serviceId !== current.serviceId && !svc) {
+      return send(res, 400, "INVALID_SERVICE", "Ese servicio no existe en tu clínica");
+    }
+    if (next.roomId !== current.roomId && !rm) {
+      return send(res, 400, "INVALID_ROOM", "Esa sala no existe en tu clínica");
+    }
+    if (next.physioId !== current.physioId && !professional) {
+      return send(res, 400, "INVALID_PHYSIO", "Ese profesional no puede atender citas en tu clínica");
+    }
   }
 
-  const endsAt = new Date(startsAt.getTime() + (await serviceDuration(next.serviceId)) * 60000);
+  const endsAt = new Date(
+    startsAt.getTime() + (await serviceDuration(clinicId, next.serviceId)) * 60000,
+  );
 
   // History: which fields changed
   const changes: Record<string, { from: unknown; to: unknown }> = {};
