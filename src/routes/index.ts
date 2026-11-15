@@ -9,12 +9,14 @@ import roomRoutes from "./room.routes.js";
 import serviceRoutes from "./service.routes.js";
 import calendarRoutes from "./calendar.routes.js";
 import reportRoutes from "./report.routes.js";
+import billingRoutes from "./billing.routes.js";
 
 const router = Router();
 
 router.use("/", healthRoutes);
 router.use("/", meRoutes);
 router.use("/admin/clinics", clinicRoutes);
+router.use("/admin/billing", billingRoutes);
 router.use("/invitations", invitationRoutes);
 // The active clinic (from the session): clinic users, by role
 router.use("/clinic/team", teamRoutes);
