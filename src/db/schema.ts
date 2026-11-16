@@ -18,5 +18,8 @@ export * from "./feature-schema.js";
 // Documentación de cada clínica: datos legales y contratos firmados (super-admin)
 export * from "./clinic-legal-schema.js";
 
+// Reserva online: interruptor de la clínica y horario de cada profesional
+export * from "./online-booking-schema.js";
+
 // Solicitudes de contacto de la web pública
 export * from "./contact-schema.js";

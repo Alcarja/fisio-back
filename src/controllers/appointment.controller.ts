@@ -125,6 +125,9 @@ async function loadAppointments(
       status: appointment.status,
       cancellationReason: appointment.cancellationReason,
       notes: appointment.notes,
+      source: appointment.source,
+      contactPhone: appointment.contactPhone,
+      contactEmail: appointment.contactEmail,
       serviceId: service.id,
       serviceName: service.name,
       serviceColor: service.color,
@@ -247,6 +250,10 @@ async function loadAppointments(
       status: r.status,
       cancellationReason: r.cancellationReason,
       notes: r.notes,
+      // "online": booked by the patient, with how to reach them
+      source: r.source,
+      contactPhone: r.contactPhone,
+      contactEmail: r.contactEmail,
       service: {
         id: r.serviceId,
         name: r.serviceName,

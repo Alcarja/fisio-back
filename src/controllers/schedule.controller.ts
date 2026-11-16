@@ -15,6 +15,8 @@ import {
   isTimezone,
   isWeekday,
   rangesError,
+  weeklyHoursError,
+  type WeeklySlot,
 } from "../lib/schedule.js";
 import { loadExceptions, loadTimezone, loadWeeklyHours } from "../lib/clinicSchedule.js";
 
@@ -45,23 +47,9 @@ export const updateWeeklyHours = async (req: Request, res: Response) => {
   const clinicId = req.clinicId!;
   const { weeklyHours } = req.body ?? {};
 
-  if (!Array.isArray(weeklyHours)) {
-    return badRequest(res, "INVALID_HOURS", "Falta el horario semanal");
-  }
-  for (const slot of weeklyHours) {
-    if (!isWeekday(slot?.weekday) || !isTime(slot?.startTime) || !isTime(slot?.endTime)) {
-      return badRequest(
-        res,
-        "INVALID_HOURS",
-        "Cada franja necesita un día (1-7) y horas en formato HH:MM",
-      );
-    }
-  }
-  const slots = weeklyHours as { weekday: number; startTime: string; endTime: string }[];
-  for (const [weekday, daySlots] of groupBy(slots, (s) => s.weekday)) {
-    const error = rangesError(daySlots);
-    if (error) return badRequest(res, "INVALID_HOURS", `Día ${weekday}: ${error}`);
-  }
+  const hoursError = weeklyHoursError(weeklyHours);
+  if (hoursError) return badRequest(res, "INVALID_HOURS", hoursError);
+  const slots = weeklyHours as WeeklySlot[];
 
   // Delete and insert together, so nobody ever sees a half-saved week
   await db.transaction(async (tx) => {

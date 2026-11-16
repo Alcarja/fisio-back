@@ -15,6 +15,10 @@ export const CLINIC_FEATURES = [
   // clinic has signed what it needs (clinic → Documentación). Without it,
   // appointments only carry a name and surname
   "clinical_history",
+  // Patients book their own appointments (link or QR). This only makes it
+  // available: the clinic still has to switch it on in Configuración →
+  // Reserva online (lib/onlineBooking.ts)
+  "online_booking",
 ] as const;
 
 export type ClinicFeature = (typeof CLINIC_FEATURES)[number];

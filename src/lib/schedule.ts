@@ -48,6 +48,24 @@ export function rangesError(ranges: TimeRange[]): string | null {
   return null;
 }
 
+export type WeeklySlot = TimeRange & { weekday: number };
+
+// Problem with a whole week of slots sent by the frontend, or null. When it
+// returns null, `value` is a WeeklySlot[]
+export function weeklyHoursError(value: unknown): string | null {
+  if (!Array.isArray(value)) return "Falta el horario semanal";
+  for (const slot of value) {
+    if (!isWeekday(slot?.weekday) || !isTime(slot?.startTime) || !isTime(slot?.endTime)) {
+      return "Cada franja necesita un día (1-7) y horas en formato HH:MM";
+    }
+  }
+  for (const [weekday, daySlots] of groupBy(value as WeeklySlot[], (s) => s.weekday)) {
+    const error = rangesError(daySlots);
+    if (error) return `Día ${weekday}: ${error}`;
+  }
+  return null;
+}
+
 // Groups slots by a key (the weekday) to check each group separately
 export function groupBy<T, K>(items: T[], key: (item: T) => K): Map<K, T[]> {
   const groups = new Map<K, T[]>();

@@ -39,6 +39,10 @@ export const appointmentStatus = pgEnum("appointment_status", [
   "cancelled", // cancelada (con motivo)
 ]);
 
+// Quién dio la cita: el personal desde la agenda, o el paciente con la reserva
+// online (src/controllers/publicBooking.controller.ts)
+export const appointmentSource = pgEnum("appointment_source", ["staff", "online"]);
+
 export const appointment = pgTable(
   "appointment",
   {
@@ -62,6 +66,14 @@ export const appointment = pgTable(
     cancellationReason: text("cancellation_reason"),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
     notes: text("notes"),
+    source: appointmentSource("source").notNull().default("staff"),
+    // Solo en las reservas online: cómo localizar a quien reservó. Van en la
+    // cita (y no en appointment_patient) para que no se pierdan al editarla
+    contactPhone: text("contact_phone"),
+    contactEmail: text("contact_email"),
+    // Solo en las reservas online: la clave del enlace con el que el paciente
+    // ve y cancela su cita. Larga y aleatoria; no se envía a la agenda
+    cancelToken: text("cancel_token"),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -75,6 +87,8 @@ export const appointment = pgTable(
     index("appointment_org_starts_idx").on(table.organizationId, table.startsAt),
     index("appointment_physio_starts_idx").on(table.physioId, table.startsAt),
     index("appointment_room_starts_idx").on(table.roomId, table.startsAt),
+    // The patient's link looks the appointment up by its key
+    index("appointment_cancel_token_idx").on(table.cancelToken),
     check("appointment_range_check", sql`${table.startsAt} < ${table.endsAt}`),
     check(
       "appointment_cancellation_check",

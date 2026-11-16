@@ -173,4 +173,121 @@ function contactRequest(data: ContactRequestData): RenderedEmail {
   };
 }
 
-export const templates = { invitation, welcome, resetPassword, contactRequest };
+// ---------- Online booking confirmed (to the patient) ----------
+
+export type BookingConfirmationData = {
+  firstName: string;
+  clinicName: string;
+  serviceName: string;
+  professionalName: string;
+  // Already written for people: "miércoles, 18 de noviembre", "10:00"
+  dateLabel: string;
+  startTime: string;
+  endTime: string;
+  // The patient's own page for this appointment
+  url: string;
+  // null: the clinic doesn't let patients cancel online
+  cancelNote: string | null;
+  // The clinic's own text for patients
+  policyText: string | null;
+};
+
+function bookingConfirmation(data: BookingConfirmationData): RenderedEmail {
+  const subject = `Tu cita en ${data.clinicName}: ${data.dateLabel}, ${data.startTime}`;
+  const button = { label: "Ver mi cita", url: data.url };
+  const details: [string, string][] = [
+    ["Día", data.dateLabel],
+    ["Hora", `${data.startTime}–${data.endTime}`],
+    ["Servicio", data.serviceName],
+    ["Con", data.professionalName],
+  ];
+  const cancel =
+    data.cancelNote ?? "Si no puedes venir, avisa a la clínica lo antes posible.";
+
+  return {
+    subject,
+    html: renderLayout({
+      preheader: `${data.dateLabel}, ${data.startTime}. ${data.serviceName}.`,
+      heading: `Cita reservada, ${data.firstName}`,
+      paragraphs: [
+        `Te esperamos en <strong>${e(data.clinicName)}</strong>.`,
+        details.map(([k, v]) => `<strong>${k}:</strong> ${e(v)}`).join("<br>"),
+        e(cancel),
+        ...(data.policyText ? [e(data.policyText).replace(/\n/g, "<br>")] : []),
+      ],
+      button,
+    }),
+    text: renderText(
+      [
+        `Hola, ${data.firstName}:`,
+        `Tu cita en ${data.clinicName} está reservada.`,
+        details.map(([k, v]) => `${k}: ${v}`).join("\n"),
+        cancel,
+        ...(data.policyText ? [data.policyText] : []),
+      ],
+      button,
+    ),
+  };
+}
+
+// ---------- Online booking made or cancelled (to the clinic) ----------
+
+export type BookingNoticeData = {
+  kind: "booked" | "cancelled";
+  clinicName: string;
+  patientName: string;
+  phone: string | null;
+  email: string | null;
+  serviceName: string;
+  professionalName: string;
+  dateLabel: string;
+  startTime: string;
+  endTime: string;
+  // What the patient wrote when booking
+  notes: string | null;
+  // The clinic's calendar
+  url: string;
+};
+
+function bookingNotice(data: BookingNoticeData): RenderedEmail {
+  const booked = data.kind === "booked";
+  const when = `${data.dateLabel}, ${data.startTime}`;
+  const subject = booked
+    ? `Nueva reserva online: ${data.patientName}, ${when}`
+    : `Reserva online cancelada: ${data.patientName}, ${when}`;
+  const intro = booked
+    ? `${data.patientName} ha reservado una cita online en ${data.clinicName}.`
+    : `${data.patientName} ha cancelado su cita online en ${data.clinicName}. La hora vuelve a estar libre.`;
+  const button = { label: "Abrir la agenda", url: data.url };
+  const rows: [string, string | null][] = [
+    ["Día", data.dateLabel],
+    ["Hora", `${data.startTime}–${data.endTime}`],
+    ["Servicio", data.serviceName],
+    ["Con", data.professionalName],
+    ["Paciente", data.patientName],
+    ["Teléfono", data.phone],
+    ["Email", data.email],
+    ["Comentario", data.notes],
+  ];
+  const filled = rows.filter((r): r is [string, string] => !!r[1]);
+
+  return {
+    subject,
+    html: renderLayout({
+      preheader: `${when}. ${data.serviceName} con ${data.professionalName}.`,
+      heading: booked ? "Nueva reserva online" : "Reserva online cancelada",
+      paragraphs: [e(intro), filled.map(([k, v]) => `<strong>${k}:</strong> ${e(v)}`).join("<br>")],
+      button,
+    }),
+    text: renderText([intro, filled.map(([k, v]) => `${k}: ${v}`).join("\n")], button),
+  };
+}
+
+export const templates = {
+  invitation,
+  welcome,
+  resetPassword,
+  contactRequest,
+  bookingConfirmation,
+  bookingNotice,
+};
