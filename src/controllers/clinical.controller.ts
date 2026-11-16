@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { caseNote, member, patient, patientCase, user } from "../db/schema.js";
+import { caseNote, clinicalLog, member, patient, patientCase, user } from "../db/schema.js";
 import { PROFESSIONAL_ROLES } from "../lib/appointments.js";
 import {
   BODY_REGIONS,
@@ -10,6 +10,7 @@ import {
   SIDES,
   isOneOf,
 } from "../lib/clinical.js";
+import { changedFrom, logClinical, logClinicalView } from "../lib/clinicalLog.js";
 import { loadTimezone } from "../lib/clinicSchedule.js";
 import { isIsoDate } from "../lib/schedule.js";
 import { utcToZoned } from "../lib/timezone.js";
@@ -18,6 +19,9 @@ import { utcToZoned } from "../lib/timezone.js";
 // (one per injury, open or closed) and their evolution notes.
 // Health data: owners, admins and physios only (patient.routes.ts), and always
 // filtered by req.clinicId.
+// Every handler leaves a row in the clinical log (lib/clinicalLog.ts): who saw
+// or changed what. Nothing with clinical content is lost: a change keeps the
+// values it replaces in the log, and a deleted note is only marked as deleted.
 
 const send = (res: Response, status: number, code: string, message: string) =>
   res.status(status).json({ error: { code, message } });
@@ -175,10 +179,18 @@ export const getClinical = async (req: Request<{ patientId: string }>, res: Resp
       .from(caseNote)
       .innerJoin(patientCase, eq(caseNote.caseId, patientCase.id))
       .leftJoin(user, eq(caseNote.authorId, user.id))
-      .where(and(eq(patientCase.patientId, patientId), eq(caseNote.organizationId, clinicId)))
+      .where(
+        and(
+          eq(patientCase.patientId, patientId),
+          eq(caseNote.organizationId, clinicId),
+          isNull(caseNote.deletedAt),
+        ),
+      )
       .orderBy(desc(caseNote.date), desc(caseNote.createdAt)),
     loadProfessionals(clinicId),
   ]);
+
+  await logClinicalView(req, patientId);
 
   res.json({
     clinical: {
@@ -213,7 +225,35 @@ export const updateBackground = async (req: Request<{ patientId: string }>, res:
     return send(res, 400, "NOTHING_TO_UPDATE", "No hay cambios que guardar");
   }
 
-  await db.update(patient).set(fields).where(eq(patient.id, found.id));
+  const [current] = await db
+    .select({
+      clinicalAlert: patient.clinicalAlert,
+      allergies: patient.allergies,
+      medication: patient.medication,
+      medicalHistory: patient.medicalHistory,
+      occupation: patient.occupation,
+    })
+    .from(patient)
+    .where(eq(patient.id, found.id));
+  const { changed, previous } = changedFrom(current!, fields);
+
+  // Saved as it was: nothing to write or to log
+  if (Object.keys(changed).length > 0) {
+    await db.transaction(async (tx) => {
+      await tx.update(patient).set(changed).where(eq(patient.id, found.id));
+      await logClinical(
+        req,
+        {
+          patientId: found.id,
+          action: "update",
+          entity: "background",
+          fields: Object.keys(changed),
+          previous,
+        },
+        tx,
+      );
+    });
+  }
   res.status(204).end();
 };
 
@@ -289,21 +329,27 @@ export const createCase = async (req: Request<{ patientId: string }>, res: Respo
     return send(res, 400, "INVALID_CASE", "El expediente necesita título y zona del cuerpo");
   }
 
-  const [created] = await db
-    .insert(patientCase)
-    .values({
-      ...fields,
-      title: fields.title,
-      bodyRegion: fields.bodyRegion,
-      physioId: fields.physioId === undefined ? req.user!.id : fields.physioId,
-      openedAt: fields.openedAt ?? today,
-      organizationId: clinicId,
-      patientId: found.id,
-      createdBy: req.user!.id,
-    })
-    .returning({ id: patientCase.id });
+  const values = {
+    ...fields,
+    title: fields.title,
+    bodyRegion: fields.bodyRegion,
+    physioId: fields.physioId === undefined ? req.user!.id : fields.physioId,
+    openedAt: fields.openedAt ?? today,
+    organizationId: clinicId,
+    patientId: found.id,
+    createdBy: req.user!.id,
+  };
+  const caseId = await db.transaction(async (tx) => {
+    const [created] = await tx.insert(patientCase).values(values).returning({ id: patientCase.id });
+    await logClinical(
+      req,
+      { patientId: found.id, action: "create", entity: "case", entityId: created!.id },
+      tx,
+    );
+    return created!.id;
+  });
 
-  res.status(201).json({ caseId: created!.id });
+  res.status(201).json({ caseId });
 };
 
 type CaseParams = { patientId: string; caseId: string };
@@ -351,13 +397,31 @@ export const updateCase = async (req: Request<CaseParams>, res: Response) => {
     return send(res, 400, "NOTHING_TO_UPDATE", "No hay cambios que guardar");
   }
 
-  await db.update(patientCase).set(fields).where(eq(patientCase.id, current.id));
+  const { changed, previous } = changedFrom(current, fields);
+  if (Object.keys(changed).length > 0) {
+    await db.transaction(async (tx) => {
+      await tx.update(patientCase).set(changed).where(eq(patientCase.id, current.id));
+      await logClinical(
+        req,
+        {
+          patientId: current.patientId,
+          action: "update",
+          entity: "case",
+          entityId: current.id,
+          fields: Object.keys(changed),
+          previous,
+        },
+        tx,
+      );
+    });
+  }
   res.status(204).end();
 };
 
 // DELETE /clinic/patients/:patientId/cases/:caseId -> 204
-// Only an expediente without notes (opened by mistake). With notes it's part
-// of the clinical history: close it instead
+// Only an expediente that never had notes (opened by mistake). With notes, even
+// deleted ones, it's part of the clinical history: close it instead.
+// What it said stays in the log
 export const deleteCase = async (req: Request<CaseParams>, res: Response) => {
   const current = await findCase(req, res);
   if (!current) return;
@@ -372,11 +436,25 @@ export const deleteCase = async (req: Request<CaseParams>, res: Response) => {
       res,
       409,
       "CASE_HAS_NOTES",
-      "Este expediente tiene notas de evolución y no se puede eliminar. Puedes cerrarlo.",
+      "Este expediente tiene o ha tenido notas de evolución y no se puede eliminar. Puedes cerrarlo.",
     );
   }
 
-  await db.delete(patientCase).where(eq(patientCase.id, current.id));
+  const { id, organizationId: _clinic, createdAt: _created, updatedAt: _updated, ...content } = current;
+  await db.transaction(async (tx) => {
+    await tx.delete(patientCase).where(eq(patientCase.id, id));
+    await logClinical(
+      req,
+      {
+        patientId: current.patientId,
+        action: "delete",
+        entity: "case",
+        entityId: id,
+        previous: content,
+      },
+      tx,
+    );
+  });
   res.status(204).end();
 };
 
@@ -426,25 +504,31 @@ export const createNote = async (req: Request<CaseParams>, res: Response) => {
   if (typeof fields === "string") return send(res, 400, "INVALID_NOTE", fields);
   if (!fields.text) return send(res, 400, "INVALID_NOTE", "La nota necesita texto");
 
-  const [created] = await db
-    .insert(caseNote)
-    .values({
-      organizationId: clinicId,
-      caseId: current.id,
-      date: fields.date ?? today,
-      painLevel: fields.painLevel ?? null,
-      text: fields.text,
-      authorId: req.user!.id,
-    })
-    .returning({ id: caseNote.id });
+  const values = {
+    organizationId: clinicId,
+    caseId: current.id,
+    date: fields.date ?? today,
+    painLevel: fields.painLevel ?? null,
+    text: fields.text,
+    authorId: req.user!.id,
+  };
+  const noteId = await db.transaction(async (tx) => {
+    const [created] = await tx.insert(caseNote).values(values).returning({ id: caseNote.id });
+    await logClinical(
+      req,
+      { patientId: current.patientId, action: "create", entity: "note", entityId: created!.id },
+      tx,
+    );
+    return created!.id;
+  });
 
-  res.status(201).json({ noteId: created!.id });
+  res.status(201).json({ noteId });
 };
 
 type NoteParams = CaseParams & { noteId: string };
 
-// The note, if it's in this expediente and the user may change it: its author,
-// or an owner or admin
+// The note, if it's in this expediente (and not deleted) and the user may
+// change it: its author, or an owner or admin
 async function findOwnNote(req: Request<NoteParams>, res: Response) {
   const current = await findCase(req, res);
   if (!current) return null;
@@ -453,7 +537,9 @@ async function findOwnNote(req: Request<NoteParams>, res: Response) {
     ? await db
         .select()
         .from(caseNote)
-        .where(and(eq(caseNote.id, noteId), eq(caseNote.caseId, current.id)))
+        .where(
+          and(eq(caseNote.id, noteId), eq(caseNote.caseId, current.id), isNull(caseNote.deletedAt)),
+        )
         .limit(1)
     : [];
   if (!note) {
@@ -464,11 +550,11 @@ async function findOwnNote(req: Request<NoteParams>, res: Response) {
     send(res, 403, "NOT_YOUR_NOTE", "Solo puedes cambiar tus propias notas");
     return null;
   }
-  return { note, openedAt: current.openedAt };
+  return { note, openedAt: current.openedAt, patientId: current.patientId };
 }
 
 // PATCH .../notes/:noteId -> 204. body: any of { text, painLevel, date }
-// The note is marked as edited
+// The note is marked as edited, and what it said before is kept in the log
 export const updateNote = async (req: Request<NoteParams>, res: Response) => {
   const found = await findOwnNote(req, res);
   if (!found) return;
@@ -480,17 +566,76 @@ export const updateNote = async (req: Request<NoteParams>, res: Response) => {
     return send(res, 400, "NOTHING_TO_UPDATE", "No hay cambios que guardar");
   }
 
-  await db
-    .update(caseNote)
-    .set({ ...fields, updatedAt: new Date() })
-    .where(eq(caseNote.id, found.note.id));
+  const { changed, previous } = changedFrom(found.note, fields);
+  if (Object.keys(changed).length > 0) {
+    await db.transaction(async (tx) => {
+      await tx
+        .update(caseNote)
+        .set({ ...changed, updatedAt: new Date() })
+        .where(eq(caseNote.id, found.note.id));
+      await logClinical(
+        req,
+        {
+          patientId: found.patientId,
+          action: "update",
+          entity: "note",
+          entityId: found.note.id,
+          fields: Object.keys(changed),
+          previous,
+        },
+        tx,
+      );
+    });
+  }
   res.status(204).end();
 };
 
 // DELETE .../notes/:noteId -> 204
+// The note stops showing in the expediente, but it isn't erased: the clinical
+// history must be kept. It stays in the database, marked, and in the exports
 export const deleteNote = async (req: Request<NoteParams>, res: Response) => {
   const found = await findOwnNote(req, res);
   if (!found) return;
-  await db.delete(caseNote).where(eq(caseNote.id, found.note.id));
+  await db.transaction(async (tx) => {
+    await tx
+      .update(caseNote)
+      .set({ deletedAt: new Date(), deletedBy: req.user!.id })
+      .where(eq(caseNote.id, found.note.id));
+    await logClinical(
+      req,
+      { patientId: found.patientId, action: "delete", entity: "note", entityId: found.note.id },
+      tx,
+    );
+  });
   res.status(204).end();
+};
+
+// ---------- Registro ----------
+
+const LOG_LIMIT = 200;
+
+// GET /clinic/patients/:patientId/log -> { entries } (owners and admins)
+// Who saw, changed or exported this patient's history, newest first. Changes
+// come with the values they replaced
+export const getClinicalLog = async (req: Request<{ patientId: string }>, res: Response) => {
+  const found = await findPatient(req, res);
+  if (!found) return;
+
+  const entries = await db
+    .select({
+      id: clinicalLog.id,
+      at: clinicalLog.createdAt,
+      userName: clinicalLog.userName,
+      action: clinicalLog.action,
+      entity: clinicalLog.entity,
+      entityId: clinicalLog.entityId,
+      fields: clinicalLog.fields,
+      previous: clinicalLog.previous,
+    })
+    .from(clinicalLog)
+    .where(and(eq(clinicalLog.organizationId, req.clinicId!), eq(clinicalLog.patientId, found.id)))
+    .orderBy(desc(clinicalLog.createdAt))
+    .limit(LOG_LIMIT);
+
+  res.json({ entries });
 };

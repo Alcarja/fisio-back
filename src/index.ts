@@ -3,7 +3,12 @@ import express, { type NextFunction, type Request, type Response } from "express
 import cors from "cors";
 import { toNodeHandler } from "better-auth/node";
 import { auth } from "./auth.js";
+import { assertEncryptionKey } from "./lib/encryption.js";
+import { logError, safePath } from "./lib/logError.js";
 import routes from "./routes/index.js";
+
+// The clinical texts are encrypted with it: don't start without it
+assertEncryptionKey();
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -31,7 +36,8 @@ app.all("/api/auth/*splat", toNodeHandler(auth));
 app.use(express.json());
 app.use("/api", routes);
 
-// Anything that throws ends here: full details in the server log, a generic
+// Anything that throws ends here: what's needed to find the bug in the server
+// log (never the data being saved or searched: lib/logError.ts), a generic
 // message to the browser (never a stack trace or a database error)
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
@@ -45,7 +51,7 @@ app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
     res.status(413).json({ error: { code: "FILE_TOO_LARGE", message: "El archivo pesa demasiado" } });
     return;
   }
-  console.error(`${req.method} ${req.originalUrl} failed:`, error);
+  logError(`${req.method} ${safePath(req.originalUrl)} failed`, error);
   if (res.headersSent) return;
   res.status(500).json({
     error: { code: "INTERNAL_ERROR", message: "Algo ha fallado. Inténtalo de nuevo." },

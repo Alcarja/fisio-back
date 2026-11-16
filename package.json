@@ -15,6 +15,7 @@
     "db:seed:clinic": "tsx src/db/seed-clinic.ts",
     "db:constraints": "tsx src/db/apply-constraints.ts",
     "db:backfill-patients": "tsx src/db/backfill-patients.ts",
+    "db:encrypt-clinical": "tsx src/db/encrypt-clinical.ts",
     "email:test": "tsx src/scripts/send-test-email.ts"
   },
   "keywords": [],

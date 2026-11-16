@@ -1,4 +1,5 @@
 import { date, index, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { encryptedText } from "../lib/encryption.js";
 import { organization, user } from "./auth-schema.js";
 
 /*
@@ -17,9 +18,10 @@ export const patient = pgTable(
   "patient",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    // restrict: una clínica con pacientes no se borra de golpe (antes se exporta)
     organizationId: text("organization_id")
       .notNull()
-      .references(() => organization.id, { onDelete: "cascade" }),
+      .references(() => organization.id, { onDelete: "restrict" }),
     firstName: text("first_name").notNull(),
     lastName: text("last_name").notNull(),
     phone: text("phone"),
@@ -31,19 +33,21 @@ export const patient = pgTable(
     city: text("city"),
     // "AAAA-MM-DD"
     birthDate: date("birth_date"),
-    // Notas internas de la clínica (administrativas, las ve también recepción)
-    notes: text("notes"),
+    // Notas internas de la clínica (administrativas, las ve también recepción).
+    // Cifradas (src/lib/encryption.ts): pueden acabar hablando de salud
+    notes: encryptedText("notes"),
 
     // Antecedentes: datos de salud que valen para todos los expedientes del
-    // paciente (clinical-schema.ts). Solo los ve el personal clínico
+    // paciente (clinical-schema.ts). Solo los ve el personal clínico.
+    // Cifrados en la base de datos (src/lib/encryption.ts)
     // Aviso destacado: "Marcapasos", "Anticoagulantes"…
-    clinicalAlert: text("clinical_alert"),
-    allergies: text("allergies"),
-    medication: text("medication"),
+    clinicalAlert: encryptedText("clinical_alert"),
+    allergies: encryptedText("allergies"),
+    medication: encryptedText("medication"),
     // Enfermedades, operaciones y lesiones anteriores
-    medicalHistory: text("medical_history"),
+    medicalHistory: encryptedText("medical_history"),
     // Profesión y actividad física
-    occupation: text("occupation"),
+    occupation: encryptedText("occupation"),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true })

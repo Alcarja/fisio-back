@@ -243,8 +243,9 @@ export type BookingNoticeData = {
   dateLabel: string;
   startTime: string;
   endTime: string;
-  // What the patient wrote when booking
-  notes: string | null;
+  // The patient wrote a comment when booking. Only that there is one: what it
+  // says may be about their health, so it's read in the agenda, not sent by email
+  hasNotes: boolean;
   // The clinic's calendar
   url: string;
 };
@@ -267,7 +268,7 @@ function bookingNotice(data: BookingNoticeData): RenderedEmail {
     ["Paciente", data.patientName],
     ["Teléfono", data.phone],
     ["Email", data.email],
-    ["Comentario", data.notes],
+    ["Comentario", data.hasNotes ? "Ha dejado un comentario: léelo en la agenda." : null],
   ];
   const filled = rows.filter((r): r is [string, string] => !!r[1]);
 

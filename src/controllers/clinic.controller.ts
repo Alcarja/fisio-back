@@ -11,6 +11,7 @@ import {
 import { CLINIC_FEATURES, getClinicFeatures, isClinicFeature } from "../lib/features.js";
 import { invitationExpiryDate, sendInvitationEmail } from "../lib/invitations.js";
 import { CLINIC_ROLES, isClinicRole } from "../lib/permissions.js";
+import { logError } from "../lib/logError.js";
 
 const clinicColumns = {
   id: organization.id,
@@ -130,7 +131,7 @@ export const createClinic = async (req: Request, res: Response) => {
 
     res.status(201).json({ clinic });
   } catch (error) {
-    console.error("createClinic failed:", error);
+    logError("createClinic failed", error);
     res.status(500).json({
       error: { code: "INTERNAL_ERROR", message: "No se pudo crear la clínica" },
     });
@@ -220,7 +221,7 @@ export const setClinicFeature = async (
 
     res.json({ features: await getClinicFeatures(clinicId) });
   } catch (error) {
-    console.error("setClinicFeature failed:", error);
+    logError("setClinicFeature failed", error);
     res.status(500).json({
       error: { code: "INTERNAL_ERROR", message: "No se pudo cambiar la funcionalidad" },
     });
@@ -354,7 +355,7 @@ export const createInvitation = async (
 
     res.status(201).json({ invitation: created });
   } catch (error) {
-    console.error("createInvitation failed:", error);
+    logError("createInvitation failed", error);
     res.status(500).json({
       error: { code: "INTERNAL_ERROR", message: "No se pudo enviar la invitación" },
     });
@@ -420,7 +421,7 @@ export const resendInvitation = async (
 
     res.json({ invitation: updated });
   } catch (error) {
-    console.error("resendInvitation failed:", error);
+    logError("resendInvitation failed", error);
     res.status(500).json({
       error: { code: "INTERNAL_ERROR", message: "No se pudo reenviar la invitación" },
     });
@@ -443,7 +444,7 @@ export const cancelInvitation = async (
 
     res.status(204).end();
   } catch (error) {
-    console.error("cancelInvitation failed:", error);
+    logError("cancelInvitation failed", error);
     res.status(500).json({
       error: { code: "INTERNAL_ERROR", message: "No se pudo cancelar la invitación" },
     });
@@ -547,7 +548,7 @@ export const updateClinic = async (
 
     res.json({ clinic });
   } catch (error) {
-    console.error("updateClinic failed:", error);
+    logError("updateClinic failed", error);
     res.status(500).json({
       error: {
         code: "INTERNAL_ERROR",
@@ -623,7 +624,7 @@ export const updateMemberRoles = async (
 
     res.json({ members: await getClinicMembers(clinicId) });
   } catch (error) {
-    console.error("updateMemberRoles failed:", error);
+    logError("updateMemberRoles failed", error);
     res.status(500).json({
       error: { code: "INTERNAL_ERROR", message: "No se pudieron guardar los roles" },
     });

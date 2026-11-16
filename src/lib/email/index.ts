@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { logError, maskEmail } from "../logError.js";
 import { sendEmail } from "./send.js";
 import { templates } from "./templates.js";
 
@@ -50,7 +51,7 @@ export async function sendTemplate<T extends TemplateName>(
     });
     return true;
   } catch (error) {
-    console.error(`[email] ${template} to ${to} failed:`, error);
+    logError(`[email] ${template} to ${maskEmail(to)} failed`, error);
     return false;
   }
 }

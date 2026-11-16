@@ -188,6 +188,9 @@ export const auth = betterAuth({
       creatorRole: "owner",
       // Only super-admins can create clinics
       allowUserToCreateOrganization: (user) => user.role === "superadmin",
+      // A clinic holds patients' clinical history, which must be kept: nobody
+      // deletes one through the API (deactivate it instead)
+      disableOrganizationDeletion: true,
       invitationExpiresIn: INVITATION_EXPIRES_IN_SECONDS,
       sendInvitationEmail: async ({ id, email, role, organization, inviter }) => {
         await sendInvitationEmail({

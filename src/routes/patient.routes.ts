@@ -12,10 +12,12 @@ import {
   deleteCase,
   deleteNote,
   getClinical,
+  getClinicalLog,
   updateBackground,
   updateCase,
   updateNote,
 } from "../controllers/clinical.controller.js";
+import { exportClinic, exportPatient } from "../controllers/export.controller.js";
 import { CLINICAL_ROLES } from "../lib/clinical.js";
 import { requireActiveClinic } from "../middlewares/requireActiveClinic.js";
 import { requireAuth } from "../middlewares/requireAuth.js";
@@ -32,6 +34,11 @@ const clinicStaff = [
   requireActiveClinic(["owner", "admin", "receptionist", "physio"]),
   feature,
 ];
+
+// Everything the clinic holds, as a file (before "/:patientId", which would
+// take "export" for an id). Not behind the feature: a clinic can still take
+// its data with it after the section is switched off
+router.get("/export", requireAuth, requireActiveClinic(["owner", "admin"]), exportClinic);
 
 router.get("/", ...clinicStaff, listPatients);
 router.post("/", ...clinicStaff, createPatient);
@@ -51,6 +58,16 @@ router.delete(
 const clinicalStaff = [requireAuth, requireActiveClinic(CLINICAL_ROLES), feature];
 
 router.get("/:patientId/clinical", ...clinicalStaff, getClinical);
+// One patient's data and whole history, to hand over to them
+router.get("/:patientId/export", ...clinicalStaff, exportPatient);
+// Who saw and changed the history, and what it said before: owners and admins
+router.get(
+  "/:patientId/log",
+  requireAuth,
+  requireActiveClinic(["owner", "admin"]),
+  feature,
+  getClinicalLog,
+);
 router.patch("/:patientId/clinical", ...clinicalStaff, updateBackground);
 router.post("/:patientId/cases", ...clinicalStaff, createCase);
 router.patch("/:patientId/cases/:caseId", ...clinicalStaff, updateCase);

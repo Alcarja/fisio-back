@@ -2,6 +2,7 @@
 //
 // With BREVO_API_KEY set, emails go out through Brevo's API. Without it (local
 // development) they're printed to the console so links can still be used.
+import { maskEmail } from "../logError.js";
 
 const BREVO_URL = "https://api.brevo.com/v3/smtp/email";
 
@@ -62,5 +63,5 @@ export async function sendEmail(email: OutgoingEmail): Promise<void> {
 
   // Only metadata: the content may contain sign-in links
   const { messageId } = (await response.json().catch(() => ({}))) as { messageId?: string };
-  console.log(`[email] sent ${email.tag} to ${email.to} (${messageId ?? "no id"})`);
+  console.log(`[email] sent ${email.tag} to ${maskEmail(email.to)} (${messageId ?? "no id"})`);
 }
