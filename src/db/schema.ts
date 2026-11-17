@@ -21,6 +21,9 @@ export * from "./clinic-legal-schema.js";
 // Reserva online: interruptor de la clínica y horario de cada profesional
 export * from "./online-booking-schema.js";
 
+// Ejercicios para casa: banco, tablas y programas de cada paciente
+export * from "./exercise-schema.js";
+
 // Recordatorios de cita por email
 export * from "./reminder-schema.js";
 

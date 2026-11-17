@@ -11,7 +11,7 @@ export type ClinicalLogEntry = {
   // null: the export of the whole clinic
   patientId: string | null;
   action: "view" | "create" | "update" | "delete" | "export";
-  entity: "record" | "background" | "case" | "note" | "clinic";
+  entity: "record" | "background" | "case" | "note" | "clinic" | "program";
   entityId?: string;
   // Changes: the fields that changed and the values they had
   fields?: string[];

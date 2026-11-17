@@ -18,6 +18,13 @@ import {
   updateNote,
 } from "../controllers/clinical.controller.js";
 import { exportClinic, exportPatient } from "../controllers/export.controller.js";
+import {
+  createProgram,
+  finishProgram,
+  getProgramItemImage,
+  listPrograms,
+  updateProgram,
+} from "../controllers/program.controller.js";
 import { CLINICAL_ROLES } from "../lib/clinical.js";
 import { requireActiveClinic } from "../middlewares/requireActiveClinic.js";
 import { requireAuth } from "../middlewares/requireAuth.js";
@@ -60,6 +67,13 @@ const clinicalStaff = [requireAuth, requireActiveClinic(CLINICAL_ROLES), feature
 router.get("/:patientId/clinical", ...clinicalStaff, getClinical);
 // One patient's data and whole history, to hand over to them
 router.get("/:patientId/export", ...clinicalStaff, exportPatient);
+// Exercises for home (programas), inside an expediente
+router.get("/:patientId/programs", ...clinicalStaff, listPrograms);
+router.post("/:patientId/cases/:caseId/programs", ...clinicalStaff, createProgram);
+router.put("/:patientId/programs/:programId", ...clinicalStaff, updateProgram);
+router.post("/:patientId/programs/:programId/finish", ...clinicalStaff, finishProgram);
+router.get("/:patientId/programs/:programId/items/:itemId/image", ...clinicalStaff, getProgramItemImage);
+
 // Who saw and changed the history, and what it said before: owners and admins
 router.get(
   "/:patientId/log",
