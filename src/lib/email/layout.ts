@@ -17,13 +17,15 @@ type LayoutOptions = {
   heading: string;
   // Already-escaped HTML paragraphs
   paragraphs: string[];
-  button: { label: string; url: string };
+  // Optional: some emails have nothing to open (an appointment reminder for
+  // an appointment given by phone)
+  button?: { label: string; url: string };
   // Small print under the button, e.g. when the link expires
   note?: string;
 };
 
 export function renderLayout({ preheader, heading, paragraphs, button, note }: LayoutOptions) {
-  const url = escapeHtml(button.url);
+  const url = button ? escapeHtml(button.url) : "";
 
   return `<!doctype html>
 <html lang="es">
@@ -41,14 +43,18 @@ export function renderLayout({ preheader, heading, paragraphs, button, note }: L
         <h1 style="margin:0 0 20px;font-size:24px;line-height:1.3;font-weight:600;">${escapeHtml(heading)}</h1>
         ${paragraphs.map((p) => `<p style="margin:0 0 16px;font-size:16px;line-height:1.6;">${p}</p>`).join("\n        ")}
       </td></tr>
-      <tr><td style="padding:8px 36px 28px;">
+      ${
+        button
+          ? `<tr><td style="padding:8px 36px 28px;">
         <a href="${url}" style="display:inline-block;background:#1d4f45;color:#ffffff;text-decoration:none;font-size:16px;font-weight:600;padding:14px 28px;border-radius:999px;">${escapeHtml(button.label)}</a>
         ${note ? `<p style="margin:20px 0 0;font-size:13px;line-height:1.5;color:#6b7572;">${escapeHtml(note)}</p>` : ""}
       </td></tr>
       <tr><td style="padding:0 36px 32px;font-size:13px;line-height:1.5;color:#6b7572;">
         Si el botón no funciona, copia este enlace en tu navegador:<br>
         <a href="${url}" style="color:#1d4f45;word-break:break-all;">${url}</a>
-      </td></tr>
+      </td></tr>`
+          : `<tr><td style="padding:0 36px 20px;"></td></tr>`
+      }
     </table>
     <p style="margin:20px 0 0;font-family:Helvetica,Arial,sans-serif;font-size:12px;color:#8a938f;">
       Enviado con ${escapeHtml(PLATFORM_NAME)}
@@ -60,8 +66,11 @@ export function renderLayout({ preheader, heading, paragraphs, button, note }: L
 }
 
 // Plain-text version: some clients and spam filters rely on it
-export function renderText(lines: string[], button: { label: string; url: string }) {
-  return [...lines, "", `${button.label}: ${button.url}`, "", `Enviado con ${PLATFORM_NAME}`].join(
-    "\n",
-  );
+export function renderText(lines: string[], button?: { label: string; url: string }) {
+  return [
+    ...lines,
+    ...(button ? ["", `${button.label}: ${button.url}`] : []),
+    "",
+    `Enviado con ${PLATFORM_NAME}`,
+  ].join("\n");
 }

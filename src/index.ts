@@ -5,6 +5,7 @@ import { toNodeHandler } from "better-auth/node";
 import { auth } from "./auth.js";
 import { assertEncryptionKey } from "./lib/encryption.js";
 import { logError, safePath } from "./lib/logError.js";
+import { startReminderScheduler } from "./lib/reminders.js";
 import routes from "./routes/index.js";
 
 // The clinical texts are encrypted with it: don't start without it
@@ -60,4 +61,6 @@ app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
 
 app.listen(PORT, HOST, () => {
   console.log(`Server running on http://${HOST}:${PORT}`);
+  // Appointment reminders: only where SEND_REMINDERS=true
+  startReminderScheduler();
 });

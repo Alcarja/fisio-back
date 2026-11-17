@@ -284,6 +284,64 @@ function bookingNotice(data: BookingNoticeData): RenderedEmail {
   };
 }
 
+// ---------- Appointment reminder (to the patient) ----------
+
+export type AppointmentReminderData = {
+  firstName: string;
+  clinicName: string;
+  // Already written for people: "miércoles, 18 de noviembre", "10:00"
+  dateLabel: string;
+  startTime: string;
+  endTime: string;
+  professionalName: string;
+  // null: the clinic prefers not to say it (it can reveal health details)
+  serviceName: string | null;
+  // The clinic's own text: address, what to bring…
+  extraText: string | null;
+  // The patient's own page, to see or cancel it. null: no page (given by the clinic)
+  url: string | null;
+};
+
+// Never anything about the patient's health: only when, where and with whom
+function appointmentReminder(data: AppointmentReminderData): RenderedEmail {
+  const subject = `Recordatorio: tu cita en ${data.clinicName}, ${data.dateLabel} a las ${data.startTime}`;
+  const button = data.url ? { label: "Ver o cancelar mi cita", url: data.url } : undefined;
+  const details: [string, string][] = [
+    ["Día", data.dateLabel],
+    ["Hora", `${data.startTime}–${data.endTime}`],
+    ...(data.serviceName ? ([["Servicio", data.serviceName]] as [string, string][]) : []),
+    ["Con", data.professionalName],
+  ];
+  const cancel = data.url
+    ? "Si no puedes venir, cancela la cita desde el enlace para que otra persona pueda usar la hora."
+    : "Si no puedes venir, avisa a la clínica lo antes posible para que otra persona pueda usar la hora.";
+
+  return {
+    subject,
+    html: renderLayout({
+      preheader: `${data.dateLabel}, ${data.startTime}, con ${data.professionalName}.`,
+      heading: `Te esperamos, ${data.firstName}`,
+      paragraphs: [
+        `Te recordamos tu cita en <strong>${e(data.clinicName)}</strong>.`,
+        details.map(([k, v]) => `<strong>${k}:</strong> ${e(v)}`).join("<br>"),
+        e(cancel),
+        ...(data.extraText ? [e(data.extraText).replace(/\n/g, "<br>")] : []),
+      ],
+      button,
+    }),
+    text: renderText(
+      [
+        `Hola, ${data.firstName}:`,
+        `Te recordamos tu cita en ${data.clinicName}.`,
+        details.map(([k, v]) => `${k}: ${v}`).join("\n"),
+        cancel,
+        ...(data.extraText ? [data.extraText] : []),
+      ],
+      button,
+    ),
+  };
+}
+
 export const templates = {
   invitation,
   welcome,
@@ -291,4 +349,5 @@ export const templates = {
   contactRequest,
   bookingConfirmation,
   bookingNotice,
+  appointmentReminder,
 };

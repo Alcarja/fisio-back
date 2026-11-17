@@ -19,6 +19,9 @@ export const CLINIC_FEATURES = [
   // available: the clinic still has to switch it on in Configuración →
   // Reserva online (lib/onlineBooking.ts)
   "online_booking",
+  // Appointment reminders by email. This only makes them available: the clinic
+  // still has to switch them on in Configuración → Recordatorios (lib/reminders.ts)
+  "reminders",
 ] as const;
 
 export type ClinicFeature = (typeof CLINIC_FEATURES)[number];

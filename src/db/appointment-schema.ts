@@ -121,6 +121,9 @@ export const appointmentPatient = pgTable(
     patientId: uuid("patient_id").references(() => patient.id, { onDelete: "set null" }),
     firstName: text("first_name").notNull(),
     lastName: text("last_name").notNull(),
+    // Solo en los pacientes sin ficha: el email que escribió la clínica al dar
+    // la cita, para los recordatorios. Con ficha se usa el de la ficha
+    contactEmail: text("contact_email"),
     attendance: attendanceStatus("attendance").notNull().default("pending"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },

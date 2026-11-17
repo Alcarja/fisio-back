@@ -19,6 +19,7 @@ import {
   isPhysioOverlapError,
 } from "../lib/appointments.js";
 import { loadExceptions, loadTimezone, loadWeeklyHours } from "../lib/clinicSchedule.js";
+import { isEmail, loadReminderStates } from "../lib/reminders.js";
 import { isIsoDate, isTime } from "../lib/schedule.js";
 import { addDaysIso, utcToZoned, zonedToUtc } from "../lib/timezone.js";
 
@@ -30,8 +31,11 @@ type AppointmentStatus = "booked" | "confirmed" | "completed" | "no_show" | "can
 const STATUSES: AppointmentStatus[] = ["booked", "confirmed", "completed", "no_show", "cancelled"];
 
 // A patient of an appointment: an existing ficha (patientId), or just the names
-// of someone without ficha (kept only on the appointment; no ficha is created)
-type PatientInput = { patientId: string } | { firstName: string; lastName: string };
+// of someone without ficha (kept only on the appointment; no ficha is created),
+// with the email for their reminders if the clinic wrote one
+type PatientInput =
+  | { patientId: string }
+  | { firstName: string; lastName: string; contactEmail: string | null };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -46,8 +50,9 @@ const send = (res: Response, status: number, code: string, message: string) =>
 const notFound = (res: Response) =>
   send(res, 404, "APPOINTMENT_NOT_FOUND", "Esta cita no existe en tu clínica");
 
-// [{ patientId } | { firstName, lastName }]: a ficha, or both names for someone
-// without one. The same ficha can't be twice in an appointment. null if invalid
+// [{ patientId } | { firstName, lastName, email? }]: a ficha, or both names
+// for someone without one. The same ficha can't be twice in an appointment.
+// null if invalid
 function parsePatients(value: unknown): PatientInput[] | null {
   if (!Array.isArray(value)) return null;
   const patients: PatientInput[] = [];
@@ -63,7 +68,10 @@ function parsePatients(value: unknown): PatientInput[] | null {
     const firstName = typeof p?.firstName === "string" ? p.firstName.trim() : "";
     const lastName = typeof p?.lastName === "string" ? p.lastName.trim() : "";
     if (!firstName || !lastName || firstName.length > 100 || lastName.length > 100) return null;
-    patients.push({ firstName, lastName });
+    if (p.email != null && typeof p.email !== "string") return null;
+    const email = typeof p.email === "string" ? p.email.trim().toLowerCase() : "";
+    if (email && !isEmail(email)) return null;
+    patients.push({ firstName, lastName, contactEmail: email || null });
   }
   return patients;
 }
@@ -104,7 +112,8 @@ async function insertAppointmentPatients(
   );
 }
 
-const INVALID_PATIENTS = "Cada paciente necesita nombre y apellidos, y no puede estar repetido";
+const INVALID_PATIENTS =
+  "Cada paciente necesita nombre y apellidos, no puede estar repetido y su email debe ser válido";
 const UNKNOWN_PATIENT = "Alguno de los pacientes no existe en tu clínica";
 
 const optionalText = (value: unknown) =>
@@ -168,6 +177,8 @@ async function loadAppointments(
       // The ficha's current name; the copy on the appointment if there's none
       firstName: sql<string>`coalesce(${patient.firstName}, ${appointmentPatient.firstName})`,
       lastName: sql<string>`coalesce(${patient.lastName}, ${appointmentPatient.lastName})`,
+      // The email the clinic wrote (patients without ficha only)
+      contactEmail: appointmentPatient.contactEmail,
       attendance: appointmentPatient.attendance,
     })
     .from(appointmentPatient)
@@ -180,6 +191,9 @@ async function loadAppointments(
       ),
     )
     .orderBy(asc(appointmentPatient.createdAt));
+
+  // Whether each patient will get (or got) their reminder
+  const reminderStates = await loadReminderStates(clinicId, rows);
 
   // Problems of future, active appointments after changes in the clinic
   // (hours, rooms, services, team). Past and cancelled ones don't need it
@@ -265,7 +279,10 @@ async function loadAppointments(
       physio: { userId: r.physioId, name: r.physioName },
       patients: patients
         .filter((p) => p.appointmentId === r.id)
-        .map(({ appointmentId: _appointmentId, ...p }) => p),
+        .map(({ appointmentId: _appointmentId, ...p }) => ({
+          ...p,
+          reminder: reminderStates.get(r.id)?.get(p.id) ?? null,
+        })),
       // Empty when everything is fine
       issues,
     };
