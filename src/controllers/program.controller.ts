@@ -1,8 +1,8 @@
 import type { Request, Response } from "express";
-import { randomBytes } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
+  clinicFeature,
   exercise,
   exerciseProgram,
   exerciseProgramItem,
@@ -14,6 +14,7 @@ import {
 import { changedFrom, logClinical } from "../lib/clinicalLog.js";
 import { loadTimezone } from "../lib/clinicSchedule.js";
 import { doseLabel, LIMITS, optionalText, parseItems } from "../lib/exercises.js";
+import { hashProgramToken, isOneActiveViolation, newProgramToken } from "../lib/programTokens.js";
 import { utcToZoned } from "../lib/timezone.js";
 import { sendExerciseImage } from "./exercise.controller.js";
 
@@ -112,8 +113,10 @@ export const listPrograms = async (req: Request<PatientParams>, res: Response) =
   });
 };
 
-// The program's fields and its exercises, copied from the bank. A string = what's wrong
-async function parseProgram(clinicId: string, body: Record<string, unknown>) {
+// The program's fields and its exercises, copied from the bank. A string = what's wrong.
+// Archived exercises can't be added; `keep` are the ones the program (or the
+// one it replaces) already had, which may stay
+async function parseProgram(clinicId: string, body: Record<string, unknown>, keep: Set<string> = new Set()) {
   const frequency = optionalText(body.frequency, LIMITS.frequency);
   if (frequency === undefined) return `La frecuencia admite ${LIMITS.frequency} caracteres`;
   const notes = optionalText(body.notes, LIMITS.notes);
@@ -129,10 +132,12 @@ async function parseProgram(clinicId: string, body: Record<string, unknown>) {
       name: exercise.name,
       instructions: exercise.instructions,
       precautions: exercise.precautions,
+      archived: exercise.archived,
     })
     .from(exercise)
     .where(and(inArray(exercise.id, ids), or(eq(exercise.organizationId, clinicId), isNull(exercise.organizationId))));
   if (sources.length !== ids.length) return "Algún ejercicio no está en el banco";
+  if (sources.some((s) => s.archived && !keep.has(s.id))) return "Algún ejercicio está archivado: elige otro del banco";
   const byId = new Map(sources.map((s) => [s.id, s]));
 
   return {
@@ -178,11 +183,8 @@ export const createProgram = async (req: Request<CaseParams>, res: Response) => 
     return send(res, 409, "CASE_CLOSED", "El expediente está cerrado. Reábrelo para pautar ejercicios.");
   }
 
-  const parsed = await parseProgram(clinicId, req.body ?? {});
-  if (typeof parsed === "string") return send(res, 400, "INVALID_PROGRAM", parsed);
-
   const [active] = await db
-    .select({ id: exerciseProgram.id })
+    .select({ id: exerciseProgram.id, accessToken: exerciseProgram.accessToken, accessTokenHash: exerciseProgram.accessTokenHash })
     .from(exerciseProgram)
     .where(and(eq(exerciseProgram.caseId, caseId), eq(exerciseProgram.status, "active")))
     .limit(1);
@@ -191,31 +193,57 @@ export const createProgram = async (req: Request<CaseParams>, res: Response) => 
     return send(res, 409, "PROGRAM_ACTIVE", "Este expediente ya tiene ejercicios activos. Finalízalos o crea una nueva fase.");
   }
 
+  // A new phase may keep the exercises the current one had, even archived
+  const keep = new Set<string>();
+  if (active) {
+    const kept = await db
+      .select({ exerciseId: exerciseProgramItem.exerciseId })
+      .from(exerciseProgramItem)
+      .where(eq(exerciseProgramItem.programId, active.id));
+    for (const k of kept) if (k.exerciseId) keep.add(k.exerciseId);
+  }
+  const parsed = await parseProgram(clinicId, req.body ?? {}, keep);
+  if (typeof parsed === "string") return send(res, 400, "INVALID_PROGRAM", parsed);
+
+  // A new phase inherits the patient's link: the one they already have keeps
+  // working and now shows the new exercises. The finished one gets a dead key
+  const token = active ? active.accessToken : newProgramToken();
   const today = utcToZoned(new Date(), await loadTimezone(clinicId)).date;
-  const programId = await db.transaction(async (tx) => {
-    if (active) {
-      await tx
-        .update(exerciseProgram)
-        .set({ status: "finished", finishedAt: new Date() })
-        .where(eq(exerciseProgram.id, active.id));
-      await logClinical(req, { patientId, action: "update", entity: "program", entityId: active.id, fields: ["status"], previous: { status: "active" } }, tx);
+  let programId: string;
+  try {
+    programId = await db.transaction(async (tx) => {
+      if (active) {
+        const dead = newProgramToken();
+        await tx
+          .update(exerciseProgram)
+          .set({ status: "finished", finishedAt: new Date(), accessToken: dead, accessTokenHash: hashProgramToken(dead) })
+          .where(eq(exerciseProgram.id, active.id));
+        await logClinical(req, { patientId, action: "update", entity: "program", entityId: active.id, fields: ["status"], previous: { status: "active" } }, tx);
+      }
+      const [created] = await tx
+        .insert(exerciseProgram)
+        .values({
+          ...parsed.fields,
+          organizationId: clinicId,
+          patientId,
+          caseId,
+          startDate: today,
+          accessToken: token,
+          accessTokenHash: hashProgramToken(token),
+          createdBy: req.user!.id,
+        })
+        .returning({ id: exerciseProgram.id });
+      await tx.insert(exerciseProgramItem).values(parsed.items.map((i) => ({ ...i, programId: created!.id })));
+      await logClinical(req, { patientId, action: "create", entity: "program", entityId: created!.id }, tx);
+      return created!.id;
+    });
+  } catch (error) {
+    // Someone else gave this expediente exercises at the same moment
+    if (isOneActiveViolation(error)) {
+      return send(res, 409, "PROGRAM_ACTIVE", "Otra persona acaba de pautar ejercicios en este expediente. Recarga la ficha.");
     }
-    const [created] = await tx
-      .insert(exerciseProgram)
-      .values({
-        ...parsed.fields,
-        organizationId: clinicId,
-        patientId,
-        caseId,
-        startDate: today,
-        accessToken: randomBytes(24).toString("base64url"),
-        createdBy: req.user!.id,
-      })
-      .returning({ id: exerciseProgram.id });
-    await tx.insert(exerciseProgramItem).values(parsed.items.map((i) => ({ ...i, programId: created!.id })));
-    await logClinical(req, { patientId, action: "create", entity: "program", entityId: created!.id }, tx);
-    return created!.id;
-  });
+    throw error;
+  }
   res.status(201).json({ programId });
 };
 
@@ -253,14 +281,14 @@ async function findProgram(req: Request<ProgramParams>, res: Response) {
 export const updateProgram = async (req: Request<ProgramParams>, res: Response) => {
   const found = await findProgram(req, res);
   if (!found) return;
-  const parsed = await parseProgram(req.clinicId!, req.body ?? {});
-  if (typeof parsed === "string") return send(res, 400, "INVALID_PROGRAM", parsed);
-
   const currentItems = await db
     .select(itemColumns)
     .from(exerciseProgramItem)
     .where(eq(exerciseProgramItem.programId, found.id))
     .orderBy(asc(exerciseProgramItem.position));
+  const keep = new Set(currentItems.flatMap((i) => (i.exerciseId ? [i.exerciseId] : [])));
+  const parsed = await parseProgram(req.clinicId!, req.body ?? {}, keep);
+  if (typeof parsed === "string") return send(res, 400, "INVALID_PROGRAM", parsed);
   const before = { frequency: found.frequency, notes: found.notes, items: itemsSummary(currentItems) };
   const after = { ...parsed.fields, items: itemsSummary(parsed.items) };
   const itemNotesChanged =
@@ -292,9 +320,10 @@ export const finishProgram = async (req: Request<ProgramParams>, res: Response) 
   const found = await findProgram(req, res);
   if (!found) return;
   await db.transaction(async (tx) => {
+    const dead = newProgramToken();
     await tx
       .update(exerciseProgram)
-      .set({ status: "finished", finishedAt: new Date() })
+      .set({ status: "finished", finishedAt: new Date(), accessToken: dead, accessTokenHash: hashProgramToken(dead) })
       .where(eq(exerciseProgram.id, found.id));
     await logClinical(
       req,
@@ -366,7 +395,8 @@ export const listActivePrograms = async (req: Request, res: Response) => {
 
 // ---------- The patient's page (public) ----------
 
-// An active program by its key, with its clinic. null if there's none
+// An active program by its key, with its clinic. null if there's none, the
+// clinic is deactivated or no longer has the Pacientes section
 async function findByToken(token: string) {
   if (!/^[\w-]{20,64}$/.test(token)) return null;
   const [found] = await db
@@ -382,8 +412,12 @@ async function findByToken(token: string) {
     })
     .from(exerciseProgram)
     .innerJoin(organization, eq(exerciseProgram.organizationId, organization.id))
+    .innerJoin(
+      clinicFeature,
+      and(eq(clinicFeature.organizationId, exerciseProgram.organizationId), eq(clinicFeature.feature, "clinical_history")),
+    )
     .leftJoin(user, eq(exerciseProgram.createdBy, user.id))
-    .where(and(eq(exerciseProgram.accessToken, token), eq(exerciseProgram.status, "active")))
+    .where(and(eq(exerciseProgram.accessTokenHash, hashProgramToken(token)), eq(exerciseProgram.status, "active")))
     .limit(1);
   if (!found || found.clinicStatus === "inactive") return null;
   return found;

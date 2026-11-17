@@ -144,6 +144,14 @@ export const duplicateExercise = async (req: Request<{ exerciseId: string }>, re
   res.status(201).json({ exercise: created });
 };
 
+// The file really is the image it says it is (by its first bytes)
+function looksLike(type: string, data: Buffer) {
+  if (type === "image/jpeg") return data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff;
+  if (type === "image/png") return data.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  if (type === "image/webp") return data.subarray(0, 4).toString("latin1") === "RIFF" && data.subarray(8, 12).toString("latin1") === "WEBP";
+  return false;
+}
+
 // PUT /clinic/exercises/:exerciseId/image -> 204. The body is the image
 // (JPG, PNG or WebP, up to 2 MB), read by express.raw in exercise.routes.ts
 export const uploadExerciseImage = async (req: Request<{ exerciseId: string }>, res: Response) => {
@@ -155,6 +163,9 @@ export const uploadExerciseImage = async (req: Request<{ exerciseId: string }>, 
   }
   if (req.body.length === 0 || req.body.length > MAX_EXERCISE_IMAGE_BYTES) {
     return send(res, 400, "INVALID_IMAGE", "La imagen está vacía o pesa más de 2 MB");
+  }
+  if (!looksLike(imageType, req.body)) {
+    return send(res, 400, "INVALID_IMAGE", "El archivo no es una imagen válida");
   }
   await db
     .update(exercise)

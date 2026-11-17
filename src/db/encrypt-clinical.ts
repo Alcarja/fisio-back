@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
-import { encrypt, isEncrypted } from "../lib/encryption.js";
+import { decrypt, encrypt, isEncrypted } from "../lib/encryption.js";
+import { hashProgramToken } from "../lib/programTokens.js";
 import { db, pool } from "./index.js";
 
 // Encrypts the clinical texts saved before encryption existed
@@ -35,6 +36,20 @@ async function main() {
       }
       console.log(`${table}: ${changed} values encrypted`);
     }
+
+    // Patients' exercise links saved before they were kept hashed: hash them
+    // and encrypt them, so the patients' links keep working
+    const { rows } = await tx.execute<{ id: string; token: string }>(
+      sql`select id, access_token as token from exercise_program where access_token_hash is null for update`,
+    );
+    for (const row of rows) {
+      const plain = decrypt(row.token);
+      await tx.execute(
+        sql`update exercise_program set access_token_hash = ${hashProgramToken(plain)},
+            access_token = ${isEncrypted(row.token) ? row.token : encrypt(plain)} where id = ${row.id}`,
+      );
+    }
+    console.log(`exercise_program: ${rows.length} links hashed`);
   });
 }
 

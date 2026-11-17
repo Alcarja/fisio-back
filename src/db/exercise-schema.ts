@@ -9,6 +9,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { encryptedText } from "../lib/encryption.js";
@@ -27,7 +28,10 @@ import { patient } from "./patient-schema.js";
  * - exercise_program: lo que se pauta a un paciente dentro de un expediente.
  *   Sus ejercicios son una copia (nombre, instrucciones, dosis): si después
  *   cambian el banco o la tabla, lo pautado no cambia. El paciente lo ve en
- *   /ejercicios/:accessToken mientras está activo.
+ *   /ejercicios/:clave mientras está activo. La clave no se guarda legible:
+ *   se busca por su resumen (accessTokenHash) y se guarda cifrada
+ *   (accessToken) para poder volver a enseñar el QR. Una nueva fase hereda la
+ *   clave: el enlace que el paciente ya tiene sigue funcionando.
  *
  * El banco y las tablas no son datos de pacientes. Los programas sí (forman
  * parte de la historia clínica): sus notas se guardan cifradas y cada cambio
@@ -148,8 +152,11 @@ export const exerciseProgram = pgTable(
     notes: encryptedText("notes"),
     startDate: date("start_date").notNull(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
-    // La clave de la página del paciente. Larga y aleatoria
-    accessToken: text("access_token").notNull().unique(),
+    // La clave de la página del paciente. Larga y aleatoria. Cifrada, para
+    // enseñar el QR otra vez; se busca por su resumen SHA-256
+    accessToken: encryptedText("access_token").notNull(),
+    // null solo en programas creados antes de guardar el resumen (src/lib/programTokens.ts)
+    accessTokenHash: text("access_token_hash").unique(),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
@@ -160,6 +167,10 @@ export const exerciseProgram = pgTable(
   (table) => [
     index("exercise_program_case_idx").on(table.caseId),
     index("exercise_program_patient_idx").on(table.organizationId, table.patientId),
+    // Un solo programa activo por expediente, también con dos fisios a la vez
+    uniqueIndex("exercise_program_one_active")
+      .on(table.caseId)
+      .where(sql`${table.status} = 'active'`),
     check("exercise_program_status_check", sql`${table.status} in ('active', 'finished')`),
   ],
 );

@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { caseNote, clinicalLog, member, patient, patientCase, user } from "../db/schema.js";
+import { caseNote, clinicalLog, exerciseProgram, member, patient, patientCase, user } from "../db/schema.js";
 import { PROFESSIONAL_ROLES } from "../lib/appointments.js";
 import {
   BODY_REGIONS,
@@ -426,11 +426,22 @@ export const deleteCase = async (req: Request<CaseParams>, res: Response) => {
   const current = await findCase(req, res);
   if (!current) return;
 
-  const [note] = await db
-    .select({ id: caseNote.id })
-    .from(caseNote)
-    .where(eq(caseNote.caseId, current.id))
-    .limit(1);
+  const [[note], [program]] = await Promise.all([
+    db.select({ id: caseNote.id }).from(caseNote).where(eq(caseNote.caseId, current.id)).limit(1),
+    db
+      .select({ id: exerciseProgram.id })
+      .from(exerciseProgram)
+      .where(eq(exerciseProgram.caseId, current.id))
+      .limit(1),
+  ]);
+  if (program) {
+    return send(
+      res,
+      409,
+      "CASE_HAS_PROGRAMS",
+      "Este expediente tiene ejercicios pautados y no se puede eliminar. Puedes cerrarlo.",
+    );
+  }
   if (note) {
     return send(
       res,
