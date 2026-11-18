@@ -18,6 +18,7 @@ import billingRoutes from "./billing.routes.js";
 import publicBookingRoutes from "./public-booking.routes.js";
 import contactRoutes from "./contact.routes.js";
 import contactAdminRoutes from "./contact-admin.routes.js";
+import siteRoutes from "./site.routes.js";
 
 const router = Router();
 
@@ -45,5 +46,6 @@ router.use("/clinic/exercises", exerciseRouter);
 router.use("/clinic/exercise-templates", templateRouter);
 router.use("/clinic/exercise-programs", programsRouter);
 router.use("/clinic/reports", reportRoutes);
+router.use("/clinic/site", siteRoutes);
 
 export default router;

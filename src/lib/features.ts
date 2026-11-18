@@ -22,6 +22,10 @@ export const CLINIC_FEATURES = [
   // Appointment reminders by email. This only makes them available: the clinic
   // still has to switch them on in Configuración → Recordatorios (lib/reminders.ts)
   "reminders",
+  // The clinic's own website, built from our templates in Admin → Mi web, on a
+  // free subdomain (<sub>.sites.kineflow.es) or its own domain. Switching it off takes the
+  // site offline
+  "website",
 ] as const;
 
 export type ClinicFeature = (typeof CLINIC_FEATURES)[number];

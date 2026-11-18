@@ -29,3 +29,6 @@ export * from "./reminder-schema.js";
 
 // Solicitudes de contacto de la web pública
 export * from "./contact-schema.js";
+
+// Web de cada clínica: contenido, dominios, fotos y perfiles públicos (WEBS.md)
+export * from "./site-schema.js";

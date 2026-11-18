@@ -4,7 +4,7 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "npm run check:sites && tsc",
     "start": "node dist/index.js",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
@@ -17,7 +17,11 @@
     "db:backfill-patients": "tsx src/db/backfill-patients.ts",
     "db:encrypt-clinical": "tsx src/db/encrypt-clinical.ts",
     "db:seed-exercises": "tsx src/db/seed-exercises.ts",
-    "email:test": "tsx src/scripts/send-test-email.ts"
+    "email:test": "tsx src/scripts/send-test-email.ts",
+    "check:sites": "sh scripts/check-sites.sh",
+    "sites:dev": "tsx watch --env-file=.env.sites src/sites/index.ts",
+    "sites:start": "node dist/sites/index.js",
+    "sites:demo": "tsx src/db/seed-site-demo.ts"
   },
   "keywords": [],
   "author": "",
@@ -29,13 +33,17 @@
     "dotenv": "^18.0.10",
     "drizzle-orm": "^0.45.4",
     "express": "^5.3.0",
-    "pg": "^8.23.1"
+    "pg": "^8.23.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.6",
     "@types/pg": "^8.23.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "auth": "^1.7.20",
     "drizzle-kit": "^0.31.11",
     "tsx": "^4.23.15",

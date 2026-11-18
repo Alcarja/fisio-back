@@ -12,6 +12,7 @@ const MAX_BUFFER = 120;
 const MAX_PRICE_CENTS = 1_000_000; // 10.000 €
 const MAX_GROUP_PATIENTS = 100;
 const COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
+const MAX_PUBLIC_DESCRIPTION = 1000;
 
 const badRequest = (res: Response, code: string, message: string) =>
   res.status(400).json({ error: { code, message } });
@@ -40,6 +41,9 @@ const serviceColumns = {
   maxPatients: service.maxPatients,
   color: service.color,
   isActive: service.isActive,
+  // On the clinic's website (Mi web)
+  publicDescription: service.publicDescription,
+  showOnWeb: service.showOnWeb,
 };
 
 async function loadServices(clinicId: string, serviceId?: string) {
@@ -90,6 +94,8 @@ type ServiceData = {
   maxPatients?: number;
   color?: string;
   isActive?: boolean;
+  publicDescription?: string | null;
+  showOnWeb?: boolean;
 };
 
 // Validates the fields sent. `partial`: missing fields are fine (PATCH).
@@ -140,6 +146,21 @@ function parseServiceInput(
   if (sent("isActive")) {
     if (typeof b.isActive !== "boolean") return { error: "isActive debe ser true o false" };
     data.isActive = b.isActive;
+  }
+  // Website: plain text (never HTML), shown under the service on Mi web
+  if (sent("publicDescription")) {
+    if (b.publicDescription !== null && typeof b.publicDescription !== "string") {
+      return { error: "La descripción para la web no es válida" };
+    }
+    const description = (b.publicDescription as string | null)?.trim() || null;
+    if (description && description.length > MAX_PUBLIC_DESCRIPTION) {
+      return { error: `La descripción para la web admite ${MAX_PUBLIC_DESCRIPTION} caracteres` };
+    }
+    data.publicDescription = description;
+  }
+  if (sent("showOnWeb")) {
+    if (typeof b.showOnWeb !== "boolean") return { error: "showOnWeb debe ser true o false" };
+    data.showOnWeb = b.showOnWeb;
   }
 
   // Individual or group: checked together with what's already saved

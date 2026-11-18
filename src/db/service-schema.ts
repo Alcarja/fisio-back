@@ -43,6 +43,9 @@ export const service = pgTable(
     color: text("color").notNull().default("#5B8DEF"),
     // Los servicios no se borran si tienen citas: se desactivan
     isActive: boolean("is_active").notNull().default(true),
+    // En la web de la clínica (WEBS.md): descripción pública y si aparece
+    publicDescription: text("public_description"),
+    showOnWeb: boolean("show_on_web").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .defaultNow()

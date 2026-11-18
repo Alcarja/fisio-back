@@ -2,14 +2,8 @@ import type { Request, Response } from "express";
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { exercise, exerciseTemplate, exerciseTemplateItem } from "../db/schema.js";
-import {
-  EXERCISE_IMAGE_TYPES,
-  LIMITS,
-  MAX_EXERCISE_IMAGE_BYTES,
-  optionalText,
-  parseExercise,
-  parseItems,
-} from "../lib/exercises.js";
+import { LIMITS, optionalText, parseExercise, parseItems } from "../lib/exercises.js";
+import { readUploadedImage } from "../lib/images.js";
 
 // Ejercicios: the clinic's bank (plus Kineflow's base bank, read only) and its
 // tablas. Owners, admins and physios of the active clinic (exercise.routes.ts).
@@ -144,32 +138,16 @@ export const duplicateExercise = async (req: Request<{ exerciseId: string }>, re
   res.status(201).json({ exercise: created });
 };
 
-// The file really is the image it says it is (by its first bytes)
-function looksLike(type: string, data: Buffer) {
-  if (type === "image/jpeg") return data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff;
-  if (type === "image/png") return data.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-  if (type === "image/webp") return data.subarray(0, 4).toString("latin1") === "RIFF" && data.subarray(8, 12).toString("latin1") === "WEBP";
-  return false;
-}
-
 // PUT /clinic/exercises/:exerciseId/image -> 204. The body is the image
 // (JPG, PNG or WebP, up to 2 MB), read by express.raw in exercise.routes.ts
 export const uploadExerciseImage = async (req: Request<{ exerciseId: string }>, res: Response) => {
   const found = await findOwn(req, res);
   if (!found) return;
-  const imageType = req.headers["content-type"]?.split(";")[0]?.trim() ?? "";
-  if (!EXERCISE_IMAGE_TYPES.includes(imageType) || !Buffer.isBuffer(req.body)) {
-    return send(res, 400, "INVALID_IMAGE", "La imagen debe ser JPG, PNG o WebP");
-  }
-  if (req.body.length === 0 || req.body.length > MAX_EXERCISE_IMAGE_BYTES) {
-    return send(res, 400, "INVALID_IMAGE", "La imagen está vacía o pesa más de 2 MB");
-  }
-  if (!looksLike(imageType, req.body)) {
-    return send(res, 400, "INVALID_IMAGE", "El archivo no es una imagen válida");
-  }
+  const image = readUploadedImage(req);
+  if (typeof image === "string") return send(res, 400, "INVALID_IMAGE", image);
   await db
     .update(exercise)
-    .set({ imageType, imageData: req.body })
+    .set({ imageType: image.type, imageData: image.data })
     .where(eq(exercise.id, found.id));
   res.status(204).end();
 };

@@ -22,9 +22,11 @@ export const EQUIPMENT = [
 // Who works with exercises: the clinical roles (receptionists don't)
 export const EXERCISE_ROLES = ["owner", "admin", "physio"] as const;
 
-// Images of the bank: small, already compressed by the browser
-export const EXERCISE_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
-export const MAX_EXERCISE_IMAGE_BYTES = 2 * 1024 * 1024;
+// Images of the bank: the same rules as every uploaded image (lib/images.ts)
+export {
+  IMAGE_TYPES as EXERCISE_IMAGE_TYPES,
+  MAX_IMAGE_BYTES as MAX_EXERCISE_IMAGE_BYTES,
+} from "./images.js";
 
 export const LIMITS = {
   name: 120,
