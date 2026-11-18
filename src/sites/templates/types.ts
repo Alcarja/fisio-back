@@ -1,5 +1,6 @@
 import type { FC, ReactNode } from "react";
 import type { SiteContent } from "../../lib/site.js";
+import type { ContentPage } from "./shared/pages.js";
 
 // What every template receives (WEBS.md 3.9). Only public data: never
 // anything about patients.
@@ -31,7 +32,7 @@ export type SiteLegalDetails = {
   privacyEmail: string | null;
 };
 
-export type SitePage = "home" | "reservar" | "aviso-legal" | "privacidad" | "cookies";
+export type SitePage = "home" | ContentPage | "reservar" | "aviso-legal" | "privacidad" | "cookies";
 
 export type SitePageProps = {
   clinic: { name: string; slug: string };
@@ -48,10 +49,14 @@ export type SitePageProps = {
   page: SitePage;
 };
 
-// A template: the page frame (header + footer) and the home page. The other
-// pages (booking, legal) are shared and drawn inside the frame
+type PageComponent = FC<{ props: SitePageProps }>;
+
+// A template: the page frame (header + footer), the home page and its own
+// content pages (shared/pages.ts). Booking and legal pages are shared and
+// drawn inside the frame
 export type SiteTemplateModule = {
   Layout: FC<{ props: SitePageProps; children: ReactNode }>;
-  Home: FC<{ props: SitePageProps }>;
+  Home: PageComponent;
+  pages: Record<ContentPage, PageComponent>;
   css: string;
 };

@@ -18,13 +18,19 @@ export const SITE_TEMPLATES: readonly SiteTemplate[] = [
   {
     key: "clara",
     label: "Clara",
-    description: "Luminosa y limpia, con mucho espacio en blanco.",
+    description: "Moderna y atrevida: titulares enormes, bloques de color y mucha personalidad. Para clínicas que quieren destacar.",
     public: true,
   },
   {
     key: "serena",
     label: "Serena",
-    description: "Cálida, con fotos grandes y tonos suaves.",
+    description: "Limpia y cercana, con horario en directo, tu equipo en primer plano y una columna dibujada en tu color. Encaja con casi cualquier clínica.",
+    public: true,
+  },
+  {
+    key: "vital",
+    label: "Vital",
+    description: "Enérgica y atrevida, con titulares grandes y fondo oscuro. Pensada para fisioterapia deportiva.",
     public: true,
   },
 ];

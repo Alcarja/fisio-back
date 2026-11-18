@@ -138,3 +138,16 @@ export function LegalFooter({ props }: { props: SitePageProps }) {
     </div>
   );
 }
+
+// The site's sections as a list of links (footers)
+export function FooterNav({ items }: { items: { href: string; label: string }[] }) {
+  return (
+    <nav className="kf-footer-nav" aria-label="Secciones">
+      {items.map((i) => (
+        <a key={i.href} href={i.href}>
+          {i.label}
+        </a>
+      ))}
+    </nav>
+  );
+}

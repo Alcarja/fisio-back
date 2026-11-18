@@ -9,8 +9,9 @@ import { TtlCache } from "./cache.js";
 import { loadPageData } from "./data.js";
 import { clinicSiteImage, db, pool } from "./db.js";
 import { notFoundHtml } from "./pages/NotFound.js";
-import { renderPage } from "./render.js";
+import { PAGE_PATHS, renderPage } from "./render.js";
 import { normalizeHost, purgeResolved, resolveHost, type Resolved } from "./resolve.js";
+import { CONTENT_PAGES, pageAvailable } from "./templates/shared/pages.js";
 import type { SitePage } from "./templates/types.js";
 
 // The sites service (WEBS.md Phase 3): serves the clinics' published websites
@@ -21,13 +22,10 @@ import type { SitePage } from "./templates/types.js";
 const app = express();
 app.disable("x-powered-by");
 
-const PAGES: Record<string, SitePage> = {
-  "/": "home",
-  "/reservar": "reservar",
-  "/aviso-legal": "aviso-legal",
-  "/privacidad": "privacidad",
-  "/cookies": "cookies",
-};
+// Path → page (render.tsx PAGE_PATHS, read the other way)
+const PAGES: Record<string, SitePage> = Object.fromEntries(
+  Object.entries(PAGE_PATHS).map(([page, path]) => [path, page as SitePage]),
+);
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -165,7 +163,7 @@ app.get("/_preview", async (req, res, next) => {
     const data = clinicId ? await loadPageData(clinicId, "draft") : null;
     if (!data) return sendNotFound(res);
 
-    const { html, scriptHashes } = renderPage({ data, page: "home", origin: publicOrigin(host), previewToken: token });
+    const { html, scriptHashes } = renderPage({ data, page: "home", origin: publicOrigin(host), previewToken: token })!;
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("Cache-Control", "private, no-store");
     res.setHeader("X-Robots-Tag", "noindex, nofollow");
@@ -216,7 +214,13 @@ app.get("/sitemap.xml", async (req, res, next) => {
     const clinic = await clinicFor(req, res);
     if (!clinic) return;
     const origin = publicOrigin(clinic.primaryHost);
-    const urls = Object.keys(PAGES).map((path) => `<url><loc>${origin}${path}</loc></url>`);
+    const data = await loadPageData(clinic.clinicId, "published");
+    if (!data) return sendNotFound(res);
+    // Only the content pages this clinic has something for
+    const paths = Object.entries(PAGES)
+      .filter(([, page]) => !(CONTENT_PAGES as readonly string[]).includes(page) || pageAvailable(page as (typeof CONTENT_PAGES)[number], data))
+      .map(([path]) => path);
+    const urls = paths.map((path) => `<url><loc>${origin}${path}</loc></url>`);
     res.setHeader("Content-Type", "application/xml; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=3600");
     res.send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.join("")}</urlset>\n`);
@@ -236,7 +240,9 @@ app.get(Object.keys(PAGES), async (req, res, next) => {
     if (!rendered) {
       const data = await loadPageData(clinic.clinicId, "published");
       if (!data) return sendNotFound(res);
-      rendered = renderPage({ data, page, origin: publicOrigin(clinic.primaryHost) });
+      const page_ = renderPage({ data, page, origin: publicOrigin(clinic.primaryHost) });
+      if (!page_) return sendNotFound(res);
+      rendered = page_;
       pageCache.set(key, rendered, clinic.clinicId);
     }
     res.setHeader("Content-Type", "text/html; charset=utf-8");

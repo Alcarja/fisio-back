@@ -50,3 +50,58 @@ export function fullAddress(c: { address?: string; postalCode?: string; city?: s
   const place = [c.postalCode, c.city].filter(Boolean).join(" ");
   return [c.address, place].filter(Boolean).join(", ");
 }
+
+// "Fisio Demo Valencia" → "FD" (monogram when there's no logo or photo)
+export const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter((w) => w.length > 2 || /^[A-ZÁÉÍÓÚÑ]/.test(w))
+    .slice(0, 2)
+    .map((w) => w.charAt(0).toUpperCase())
+    .join("") || name.charAt(0).toUpperCase();
+
+// The first sentence of a text (pull quotes)
+export function firstSentence(text: string | undefined) {
+  const t = (text ?? "").trim();
+  const match = t.match(/^(.+?[.!?])(\s|$)/);
+  return match ? match[1]! : t;
+}
+
+// ---------- Open now ----------
+
+const SHORT_DAYS: Record<string, number> = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
+
+// The weekday (1 = Monday) and "HH:MM" in Spain right now. Pages are cached
+// for 60 s, so the status is at most a minute late
+export function spainNow(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Madrid",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return { weekday: SHORT_DAYS[get("weekday")] ?? 1, time: `${get("hour")}:${get("minute")}` };
+}
+
+// "Abierto · hasta las 14:00", "Cerrado · abrimos a las 16:00", "… mañana a
+// las 9:00", "… el lunes a las 9:00". null without opening hours
+export function openStatus(hours: SiteHours[], now = spainNow()): { open: boolean; label: string } | null {
+  if (!hours.length) return null;
+  const short = (t: string) => t.replace(/^0(\d)/, "$1");
+  const today = hours.filter((h) => h.weekday === now.weekday).sort((a, b) => a.start.localeCompare(b.start));
+  const current = today.find((h) => h.start <= now.time && now.time < h.end);
+  if (current) return { open: true, label: `Abierto · hasta las ${short(current.end)}` };
+  const later = today.find((h) => h.start > now.time);
+  if (later) return { open: false, label: `Cerrado · abrimos a las ${short(later.start)}` };
+  for (let i = 1; i <= 7; i++) {
+    const day = ((now.weekday - 1 + i) % 7) + 1;
+    const first = hours.filter((h) => h.weekday === day).sort((a, b) => a.start.localeCompare(b.start))[0];
+    if (first) {
+      const when = i === 1 ? "mañana" : `el ${WEEKDAYS[day - 1]!.toLowerCase()}`;
+      return { open: false, label: `Cerrado · abrimos ${when} a las ${short(first.start)}` };
+    }
+  }
+  return null;
+}

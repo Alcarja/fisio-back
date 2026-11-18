@@ -9,8 +9,8 @@ import type { SitePageProps } from "../templates/types.js";
 
 function LegalPage({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="cl-page kf-page kf-legal-page">
-      <div className="cl-wrap cl-narrow">
+    <section className="kf-page kf-legal-page">
+      <div className="kf-wrap kf-narrow">
         <h1>{title}</h1>
         {children}
       </div>

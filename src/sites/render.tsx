@@ -7,6 +7,7 @@ import BookingPage from "./pages/BookingPage.js";
 import { CookiesPolicy, LegalNotice, PrivacyPolicy } from "./pages/LegalPages.js";
 import { getTemplate } from "./templates/index.js";
 import { fullAddress, SCHEMA_DAYS } from "./templates/shared/format.js";
+import { CONTENT_PAGE_META, isContentPage, pageAvailable } from "./templates/shared/pages.js";
 import type { SitePage, SitePageProps } from "./templates/types.js";
 
 // A whole page as HTML: React renders it once on the server (no JavaScript in
@@ -16,7 +17,7 @@ import type { SitePage, SitePageProps } from "./templates/types.js";
 // The only script on clinic sites: on /reservar, resize the booking frame
 // with the height that kineflow.es reports. Only messages from the app and
 // from that frame count
-export const BOOKING_SCRIPT = `(function(){var f=document.getElementById("kf-booking");if(!f)return;window.addEventListener("message",function(e){if(e.origin!==${JSON.stringify(appOrigin)}||e.source!==f.contentWindow)return;var d=e.data;if(d&&d.type==="kineflow:height"&&typeof d.height==="number"){f.style.height=Math.max(420,Math.ceil(d.height))+"px"}})})();`;
+export const BOOKING_SCRIPT = `(function(){var f=document.getElementById("kf-booking");if(!f)return;window.addEventListener("message",function(e){if(e.origin!==${JSON.stringify(appOrigin)}||e.source!==f.contentWindow)return;var d=e.data;if(d&&d.type==="kineflow:height"&&typeof d.height==="number"){f.style.height=Math.max(320,Math.ceil(d.height))+"px"}})})();`;
 // Allowed by its hash in the Content-Security-Policy (no 'unsafe-inline')
 export const BOOKING_SCRIPT_HASH = `'sha256-${createHash("sha256").update(BOOKING_SCRIPT).digest("base64")}'`;
 
@@ -24,8 +25,12 @@ export const BOOKING_SCRIPT_HASH = `'sha256-${createHash("sha256").update(BOOKIN
 export const scriptHash = (code: string) =>
   `'sha256-${createHash("sha256").update(code).digest("base64")}'`;
 
-const PAGE_PATHS: Record<SitePage, string> = {
+export const PAGE_PATHS: Record<SitePage, string> = {
   home: "/",
+  servicios: CONTENT_PAGE_META.servicios.path,
+  equipo: CONTENT_PAGE_META.equipo.path,
+  nosotros: CONTENT_PAGE_META.nosotros.path,
+  contacto: CONTENT_PAGE_META.contacto.path,
   reservar: "/reservar",
   "aviso-legal": "/aviso-legal",
   privacidad: "/privacidad",
@@ -33,6 +38,10 @@ const PAGE_PATHS: Record<SitePage, string> = {
 };
 
 const PAGE_TITLES: Partial<Record<SitePage, string>> = {
+  servicios: CONTENT_PAGE_META.servicios.title,
+  equipo: CONTENT_PAGE_META.equipo.title,
+  nosotros: CONTENT_PAGE_META.nosotros.title,
+  contacto: CONTENT_PAGE_META.contacto.title,
   reservar: "Reservar cita",
   "aviso-legal": "Aviso legal",
   privacidad: "Política de privacidad",
@@ -98,12 +107,35 @@ function soft(hex: string, amount = 0.08) {
   return `rgb(${r},${g},${b})`;
 }
 
+// The colour mixed with black (hover, deep backgrounds)
+function deep(hex: string, amount = 0.35) {
+  const [r, g, b] = rgb(hex).map((v) => Math.round(v * (1 - amount)));
+  return `rgb(${r},${g},${b})`;
+}
+
+// The clinic's palette as CSS variables. Templates only use these, never a
+// hard-coded clinic colour. Without a second colour, a deeper shade of the
+// main one plays that role
+function palette(primary: string, accent: string | undefined) {
+  const second = accent ?? null;
+  return [
+    `--primary:${primary}`,
+    `--primary-contrast:${contrastText(primary)}`,
+    `--primary-soft:${soft(primary)}`,
+    `--primary-tint:${soft(primary, 0.18)}`,
+    `--primary-deep:${deep(primary)}`,
+    `--accent:${second ?? deep(primary, 0.2)}`,
+    `--accent-contrast:${contrastText(second ?? primary)}`,
+    `--accent-soft:${second ? soft(second, 0.14) : soft(primary, 0.14)}`,
+  ].join(";");
+}
+
 // Shared by every template: reset, typography, the kf- blocks
 const BASE_CSS = `
 *,*::before,*::after{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
 body{margin:0;font-family:var(--font-body);color:var(--ink);background:#fff;line-height:1.6;font-size:1.0625rem;-webkit-font-smoothing:antialiased}
-h1,h2,h3{font-family:var(--font-heading);font-weight:var(--heading-weight);line-height:1.15;letter-spacing:-.01em;color:var(--ink)}
+h1,h2,h3{font-family:var(--font-heading);font-weight:var(--heading-weight);line-height:1.15;letter-spacing:-.01em;color:var(--ink);overflow-wrap:break-word}
 img{max-width:100%;height:auto}
 a{color:var(--primary)}
 .icon{width:1.15rem;height:1.15rem;flex:none}
@@ -120,9 +152,42 @@ a{color:var(--primary)}
 .kf-legal p{margin:0 0 .5rem}
 .kf-legal nav{display:flex;flex-wrap:wrap;gap:1rem;margin:.5rem 0}
 .kf-credit{opacity:.7}
-.kf-booking-frame{display:block;width:100%;height:720px;border:0;background:transparent}
+.kf-footer-nav{display:flex;flex-wrap:wrap;gap:.75rem 1.75rem}
+.kf-footer-nav a{text-decoration:none;opacity:.85}
+.kf-footer-nav a:hover{opacity:1;text-decoration:underline}
+.kf-booking-frame{display:block;width:100%;height:440px;border:0;background:transparent;transition:height .25s ease}
+.kf-booking-head{max-width:40rem;margin-bottom:2.5rem}
+.kf-booking-head h1{margin:0 0 .75rem}
+.kf-booking-kicker{display:inline-flex;align-items:center;gap:.5rem;margin:0 0 1rem;font-size:.85rem;font-weight:600;color:var(--primary)}
+.kf-booking-lead{margin:0;color:var(--muted)}
+.kf-booking-grid{display:grid;gap:2rem;align-items:start}
+.kf-booking-aside{display:grid;gap:1rem}
+.kf-booking-card{padding:1.5rem;border:1px solid var(--line);border-radius:1.25rem;background:#fff}
+.kf-booking-card h2{font-size:1.1rem;margin:0 0 1rem}
+.kf-booking-card .kf-contact{font-size:.95rem}
+.kf-booking-card .kf-hours{font-size:.86rem;max-width:none}
+.kf-booking-card .kf-hours td{white-space:nowrap;text-align:right}
+.kf-booking-card .kf-hours th{padding-right:.75rem}
+.kf-booking-steps{list-style:none;margin:0;padding:0;display:grid;gap:.75rem;font-size:.95rem}
+.kf-booking-steps li{display:flex;gap:.65rem;align-items:flex-start}
+.kf-booking-steps .icon{margin-top:.2rem;color:var(--primary)}
+.kf-booking-call{display:flex;align-items:center;gap:.5rem;margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem;font-weight:600;text-decoration:none}
+.kf-booking-offline{padding:2rem;border:1px dashed var(--line);border-radius:1.25rem;background:#fff}
+.kf-booking-offline p{margin:0;font-size:1.1rem}
+.kf-status{display:inline-flex;align-items:center;gap:.5rem;margin:0 0 1rem;font-size:.9rem;font-weight:500;color:var(--muted)}
+.kf-status span{width:.5rem;height:.5rem;border-radius:999px;background:#b4b9b7}
+.kf-status-open{color:#1f7a4d}
+.kf-status-open span{background:#22a06b;box-shadow:0 0 0 3px rgba(34,160,107,.18)}
+@media (min-width:60rem){.kf-booking-grid{grid-template-columns:minmax(0,1fr) 22rem;gap:2.5rem}.kf-booking-aside{position:sticky;top:6rem}}
+.kf-wrap{width:100%;max-width:72rem;margin:0 auto;padding:0 1.25rem}
+.kf-narrow{max-width:46rem}
+.kf-page{padding:3rem 0 5rem}
+.kf-page h1{font-size:clamp(2rem,5vw,3.25rem);margin:0 0 1.5rem}
 .kf-legal-page h2{font-size:1.35rem;margin:2rem 0 .5rem}
 .kf-legal-page li{margin:.35rem 0}
+.kf-skip{position:absolute;left:-9999px;top:0}
+.kf-skip:focus{left:1rem;top:1rem;z-index:100;background:#fff;color:var(--ink);padding:.5rem 1rem;border-radius:.5rem}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 `;
 
 // ---------- The page ----------
@@ -137,8 +202,10 @@ type RenderOptions = {
   previewToken?: string;
 };
 
-export function renderPage({ data, page, origin, previewToken }: RenderOptions): { html: string; scriptHashes: string[] } {
+// null: a content page this clinic has nothing for (the caller sends a 404)
+export function renderPage({ data, page, origin, previewToken }: RenderOptions): { html: string; scriptHashes: string[] } | null {
   const { content } = data;
+  if (isContentPage(page) && !pageAvailable(page, data)) return null;
   const template = getTemplate(data.template);
   const img = (id?: string) =>
     id ? `/_img/${id}${previewToken ? `?t=${encodeURIComponent(previewToken)}` : ""}` : undefined;
@@ -161,6 +228,11 @@ export function renderPage({ data, page, origin, previewToken }: RenderOptions):
   const body =
     page === "home" ? (
       <template.Home props={props} />
+    ) : isContentPage(page) ? (
+      (() => {
+        const Page = template.pages[page];
+        return <Page props={props} />;
+      })()
     ) : page === "reservar" ? (
       <BookingPage props={props} />
     ) : page === "aviso-legal" ? (
@@ -181,7 +253,7 @@ export function renderPage({ data, page, origin, previewToken }: RenderOptions):
 
   const fonts = fontFaces(content.theme.font);
   const primary = content.theme.primary;
-  const vars = `:root{--primary:${primary};--primary-contrast:${contrastText(primary)};--primary-soft:${soft(primary)};--accent:${content.theme.accent ?? primary};--ink:#1d2422;--muted:#5b6461;--line:#e4e7e5;${fonts.vars}}`;
+  const vars = `:root{${palette(primary, content.theme.accent)};--ink:#1d2422;--muted:#5b6461;--line:#e4e7e5;${fonts.vars}}`;
 
   const jsonLd = page === "home" ? JSON.stringify(localBusiness(data, origin, cover)).replace(/</g, "\\u003c") : null;
   const scripts = [
