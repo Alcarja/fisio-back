@@ -5,6 +5,7 @@ import type { PageData } from "./data.js";
 import { appOrigin, env } from "./env.js";
 import BookingPage from "./pages/BookingPage.js";
 import { CookiesPolicy, LegalNotice, PrivacyPolicy } from "./pages/LegalPages.js";
+import { tailwindCss } from "./tailwind.js";
 import { getTemplate } from "./templates/index.js";
 import { fullAddress, SCHEMA_DAYS } from "./templates/shared/format.js";
 import { CONTENT_PAGE_META, isContentPage, pageAvailable } from "./templates/shared/pages.js";
@@ -253,7 +254,13 @@ export function renderPage({ data, page, origin, previewToken }: RenderOptions):
 
   const fonts = fontFaces(content.theme.font);
   const primary = content.theme.primary;
-  const vars = `:root{${palette(primary, content.theme.accent)};--ink:#1d2422;--muted:#5b6461;--line:#e4e7e5;${fonts.vars}}`;
+  // Defaults for the shadcn tokens (Tailwind classes, shared/ui.tsx); each
+  // template can redefine them
+  const vars = `:root{${palette(primary, content.theme.accent)};--ink:#1d2422;--muted:#5b6461;--line:#e4e7e5;--background:#fff;--foreground:var(--ink);--card:#fff;--card-foreground:var(--ink);--muted-foreground:var(--muted);--secondary:var(--primary-soft);--secondary-foreground:var(--primary-deep);--primary-foreground:var(--primary-contrast);--border:var(--line);--ring:var(--primary);--radius:.75rem;${fonts.vars}}`;
+  // Layers, lowest first (tailwind.css): the shared base (fonts, palette,
+  // reset, kf- blocks) < the shadcn parts ("ui") < the template's own CSS
+  // ("components") < Tailwind utilities, which always win
+  const css = `@layer properties, theme, base, ui, components, utilities;\n@layer base{\n${fonts.css}\n${vars}\n${BASE_CSS}\n}\n@layer components{\n${template.css}\n}\n${tailwindCss()}`;
 
   const jsonLd = page === "home" ? JSON.stringify(localBusiness(data, origin, cover)).replace(/</g, "\\u003c") : null;
   const scripts = [
@@ -279,7 +286,7 @@ export function renderPage({ data, page, origin, previewToken }: RenderOptions):
         {logo && <link rel="icon" href={logo} />}
         <meta name="theme-color" content={primary} />
         <link rel="preload" href={fonts.preload} as="font" type="font/woff2" crossOrigin="anonymous" />
-        <style dangerouslySetInnerHTML={{ __html: `${fonts.css}\n${vars}\n${BASE_CSS}\n${template.css}` }} />
+        <style dangerouslySetInnerHTML={{ __html: css }} />
         {jsonLd && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd }} />}
       </head>
       <body>

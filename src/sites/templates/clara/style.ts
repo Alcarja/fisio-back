@@ -1,5 +1,3 @@
-import { uiCss } from "../shared/ui.js";
-
 // Clara: bold, modern, a little aggressive, with its own structure (tile
 // hero, split services board, team rail, dark timeline, bento, "Hablemos").
 // Thick ink outlines, hard offset shadows, heavy type, blocks of the clinic's
@@ -375,4 +373,4 @@ a.cl-board-row:hover .cl-board-go{transform:rotate(45deg);background:var(--ink);
 }
 `;
 
-export default uiCss + clara;
+export default clara;

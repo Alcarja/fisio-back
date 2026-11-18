@@ -2,3 +2,6 @@ node_modules
 dist
 .env
 .env.sites
+
+# Built by npm run sites:css (part of npm run build)
+sites-assets/generated/

@@ -1,5 +1,3 @@
-import { uiCss } from "../shared/ui.js";
-
 // Serena: a physiotherapy clinic's site on the shadcn components
 // (shared/ui.tsx). Clean white, surfaces tinted with the clinic's own colour
 // (so every clinic's site feels like its own), clear cards, a drawn spine as
@@ -398,4 +396,4 @@ a.se-sticker:hover{transform:scale(1.05) rotate(-4deg)}
 }
 `;
 
-export default uiCss + serena + details;
+export default serena + details;
