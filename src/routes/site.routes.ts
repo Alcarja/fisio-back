@@ -1,13 +1,17 @@
 import express, { Router } from "express";
 import {
+  addDomain,
   changeSubdomain,
+  checkDomain,
   createPreviewToken,
   deleteSiteImage,
   getSite,
   getSiteImage,
   getSiteTeam,
   publishSite,
+  removeDomain,
   saveDraft,
+  setPrimaryDomain,
   unpublishSite,
   updateSiteTeamMember,
   uploadSiteImage,
@@ -29,6 +33,12 @@ router.put("/subdomain", ...siteEditors, changeSubdomain);
 router.post("/publish", ...siteEditors, publishSite);
 router.post("/unpublish", ...siteEditors, unpublishSite);
 router.post("/preview-token", ...siteEditors, createPreviewToken);
+
+// Own domain (WEBS.md Phase 4)
+router.post("/domains", ...siteEditors, addDomain);
+router.put("/domains/primary", ...siteEditors, setPrimaryDomain);
+router.delete("/domains", ...siteEditors, removeDomain);
+router.post("/domains/check", ...siteEditors, checkDomain);
 
 router.get("/images/:imageId", ...siteEditors, getSiteImage);
 // The image is the request body. Checked before reading it

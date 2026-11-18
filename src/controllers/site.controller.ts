@@ -4,6 +4,7 @@ import { db } from "../db/index.js";
 import {
   clinicLegal,
   clinicSite,
+  clinicSiteDomain,
   clinicSiteImage,
   member,
   memberPublicProfile,
@@ -21,7 +22,8 @@ import {
   type SiteContent,
   type SiteLegal,
 } from "../lib/site.js";
-import { previewOrigin, purgeSitesCache, subdomainUrl } from "../lib/sitesCache.js";
+import { checkClinicDomain, domainsConfigured, newVerifyToken, parseDomain, serverIpv4 } from "../lib/domains.js";
+import { domainUrl, previewOrigin, purgeSitesCache, siteBaseDomain, subdomainUrl } from "../lib/sitesCache.js";
 import { DEFAULT_TEMPLATE, isTemplateAllowed, templatesFor } from "../lib/siteTemplates.js";
 import { makePreviewToken, previewConfigured } from "../lib/siteTokens.js";
 
@@ -144,18 +146,61 @@ async function loadLegal(clinicId: string): Promise<SiteLegal | null> {
   return legal ?? null;
 }
 
+// ---------- Own domain (WEBS.md Phase 4) ----------
+
+// The clinic's domain as Mi web shows it: the hostnames with their status and
+// the DNS records to add. null without a domain
+async function loadDomain(clinicId: string) {
+  const rows = await db
+    .select({
+      hostname: clinicSiteDomain.hostname,
+      isPrimary: clinicSiteDomain.isPrimary,
+      status: clinicSiteDomain.status,
+      lastError: clinicSiteDomain.lastError,
+      lastCheckedAt: clinicSiteDomain.lastCheckedAt,
+      verifiedAt: clinicSiteDomain.verifiedAt,
+      verifyToken: clinicSiteDomain.verifyToken,
+    })
+    .from(clinicSiteDomain)
+    .where(eq(clinicSiteDomain.organizationId, clinicId));
+  if (!rows.length) return null;
+  const apex = rows.map((r) => r.hostname).sort((a, b) => a.length - b.length)[0]!;
+  const primary = rows.find((r) => r.isPrimary)?.hostname ?? apex;
+  return {
+    apex,
+    primary: primary === apex ? ("apex" as const) : ("www" as const),
+    hosts: rows
+      .sort((a, b) => a.hostname.length - b.hostname.length)
+      .map(({ verifyToken: _token, ...r }) => r),
+    records: [
+      { type: "A", name: "@", value: serverIpv4() ?? "" },
+      { type: "CNAME", name: "www", value: siteBaseDomain() },
+      { type: "TXT", name: "_kineflow", value: rows[0]!.verifyToken },
+    ],
+  };
+}
+
+// The address visitors see: the connected primary domain, or the subdomain
+function publicUrlOf(subdomain: string, domain: Awaited<ReturnType<typeof loadDomain>>) {
+  const primary = domain?.hosts.find((h) => h.isPrimary && h.status === "verified");
+  return primary ? domainUrl(primary.hostname) : subdomainUrl(subdomain);
+}
+
 // What every Mi web call answers with: the site and everything the editor needs
 async function siteResponse(clinicId: string) {
   const site = await ensureSite(clinicId);
-  const legal = await loadLegal(clinicId);
+  const [legal, domain] = await Promise.all([loadLegal(clinicId), loadDomain(clinicId)]);
   return {
     site,
     templates: templatesFor(site.customTemplate),
     legal,
     legalMissing: missingLegal(legal),
     problems: publishProblems(site.draft, legal),
-    publicUrl: subdomainUrl(site.subdomain),
+    publicUrl: publicUrlOf(site.subdomain, domain),
+    subdomainUrl: subdomainUrl(site.subdomain),
     previewAvailable: previewConfigured(),
+    domainsAvailable: domainsConfigured(),
+    domain,
   };
 }
 
@@ -535,4 +580,90 @@ export const updateSiteTeamMember = async (req: Request<{ memberId: string }>, r
     .onConflictDoUpdate({ target: memberPublicProfile.memberId, set: values });
   await purgeSitesCache(clinicId);
   res.status(204).end();
+};
+
+// ---------- Own domain ----------
+
+const domainsOff = (res: Response) =>
+  send(res, 503, "DOMAINS_UNAVAILABLE", "Los dominios propios aún no están disponibles");
+
+// POST /clinic/site/domains -> SiteData. body: { domain, primary: "apex" | "www" }
+// One domain per clinic: its apex and www, with the same TXT token
+export const addDomain = async (req: Request, res: Response) => {
+  if (!domainsConfigured()) return domainsOff(res);
+  const clinicId = req.clinicId!;
+  await ensureSite(clinicId);
+  const parsed = parseDomain(req.body?.domain);
+  if (!parsed.ok) return send(res, 400, "INVALID_DOMAIN", parsed.error);
+  const primary = req.body?.primary === "www" ? "www" : "apex";
+  const { apex } = parsed;
+  const www = `www.${apex}`;
+
+  const [existing] = await db
+    .select({ id: clinicSiteDomain.id })
+    .from(clinicSiteDomain)
+    .where(eq(clinicSiteDomain.organizationId, clinicId))
+    .limit(1);
+  if (existing) return send(res, 409, "DOMAIN_EXISTS", "Ya tienes un dominio. Quítalo antes de añadir otro.");
+
+  const taken = () =>
+    send(res, 409, "DOMAIN_TAKEN", "Este dominio ya está conectado a otra clínica. Escríbenos si es tuyo.");
+  const token = newVerifyToken();
+  try {
+    await db.insert(clinicSiteDomain).values([
+      { organizationId: clinicId, hostname: apex, isPrimary: primary === "apex", verifyToken: token },
+      { organizationId: clinicId, hostname: www, isPrimary: primary === "www", verifyToken: token },
+    ]);
+  } catch (error) {
+    if ((error as { cause?: { code?: string } }).cause?.code === "23505") return taken();
+    throw error;
+  }
+  console.log(`[site] domain added clinic=${clinicId} domain=${apex} by=${req.user!.id}`);
+  res.status(201).json(await siteResponse(clinicId));
+};
+
+// PUT /clinic/site/domains/primary -> SiteData. body: { primary: "apex" | "www" }
+export const setPrimaryDomain = async (req: Request, res: Response) => {
+  const clinicId = req.clinicId!;
+  const domain = await loadDomain(clinicId);
+  if (!domain) return send(res, 404, "NO_DOMAIN", "No tienes ningún dominio");
+  const primary = req.body?.primary === "www" ? `www.${domain.apex}` : domain.apex;
+  await db
+    .update(clinicSiteDomain)
+    .set({ isPrimary: sql`${clinicSiteDomain.hostname} = ${primary}` })
+    .where(eq(clinicSiteDomain.organizationId, clinicId));
+  await purgeSitesCache(clinicId);
+  res.json(await siteResponse(clinicId));
+};
+
+// DELETE /clinic/site/domains -> SiteData. The site goes back to the subdomain
+export const removeDomain = async (req: Request, res: Response) => {
+  const clinicId = req.clinicId!;
+  const removed = await db
+    .delete(clinicSiteDomain)
+    .where(eq(clinicSiteDomain.organizationId, clinicId))
+    .returning({ hostname: clinicSiteDomain.hostname });
+  if (removed.length) {
+    console.log(`[site] domain removed clinic=${clinicId} by=${req.user!.id}`);
+    await purgeSitesCache(clinicId);
+  }
+  res.json(await siteResponse(clinicId));
+};
+
+// The clinic asked a minute ago: once per 30 s each, in this process
+const lastManualCheck = new Map<string, number>();
+const CHECK_EVERY_MS = 30_000;
+
+// POST /clinic/site/domains/check -> SiteData. Checks the DNS now
+export const checkDomain = async (req: Request, res: Response) => {
+  if (!domainsConfigured()) return domainsOff(res);
+  const clinicId = req.clinicId!;
+  const last = lastManualCheck.get(clinicId) ?? 0;
+  if (Date.now() - last < CHECK_EVERY_MS) {
+    return send(res, 429, "TOO_SOON", "Acabamos de comprobarlo. Espera unos segundos y vuelve a intentarlo.");
+  }
+  lastManualCheck.set(clinicId, Date.now());
+  const done = await checkClinicDomain(clinicId);
+  if (!done) return send(res, 503, "DNS_UNAVAILABLE", "No hemos podido consultar los DNS ahora mismo. Inténtalo en un momento.");
+  res.json(await siteResponse(clinicId));
 };

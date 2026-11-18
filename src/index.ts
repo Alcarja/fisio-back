@@ -5,6 +5,7 @@ import { toNodeHandler } from "better-auth/node";
 import { auth } from "./auth.js";
 import { assertEncryptionKey } from "./lib/encryption.js";
 import { logError, safePath } from "./lib/logError.js";
+import { startDomainChecker } from "./lib/domains.js";
 import { startReminderScheduler } from "./lib/reminders.js";
 import routes from "./routes/index.js";
 
@@ -63,4 +64,6 @@ app.listen(PORT, HOST, () => {
   console.log(`Server running on http://${HOST}:${PORT}`);
   // Appointment reminders: only where SEND_REMINDERS=true
   startReminderScheduler();
+  // Clinics' own domains: only where CHECK_DOMAINS=true
+  startDomainChecker();
 });

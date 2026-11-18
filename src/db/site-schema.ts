@@ -89,6 +89,9 @@ export const clinicSiteDomain = pgTable(
     lastError: text("last_error"), // e.g. "A_RECORD_MISSING", "TXT_MISSING"
     lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    // A connected hostname that started failing the daily check: marked as an
+    // error (and the owners emailed) after the 3rd day in a row (lib/domains.ts)
+    failingSince: timestamp("failing_since", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [

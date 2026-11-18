@@ -342,7 +342,77 @@ function appointmentReminder(data: AppointmentReminderData): RenderedEmail {
   };
 }
 
+// ---------- Own domains (Mi web → Dominio) ----------
+
+export type DomainData = { name: string; clinicName: string; domain: string; url: string };
+
+function domainConnected(data: DomainData): RenderedEmail {
+  const subject = `Tu web ya está en ${data.domain}`;
+  const button = { label: "Ver Mi web", url: data.url };
+  const lines = [
+    `El dominio <strong>${e(data.domain)}</strong> ya está conectado a la web de <strong>${e(data.clinicName)}</strong>.`,
+    "Las direcciones anteriores (la dirección gratuita y la versión con o sin www) redirigen automáticamente a tu dominio.",
+  ];
+  return {
+    subject,
+    html: renderLayout({ preheader: "Tu dominio ya funciona.", heading: `Hola, ${data.name}`, paragraphs: lines, button }),
+    text: renderText(
+      [`Hola, ${data.name}:`, `El dominio ${data.domain} ya está conectado a la web de ${data.clinicName}.`, "Las direcciones anteriores redirigen automáticamente a tu dominio."],
+      button,
+    ),
+  };
+}
+
+function domainBroken(data: DomainData): RenderedEmail {
+  const subject = `${data.domain} ya no apunta a tu web`;
+  const button = { label: "Revisar la configuración", url: data.url };
+  const note = "Mientras tanto, tu web sigue disponible en su dirección gratuita.";
+  return {
+    subject,
+    html: renderLayout({
+      preheader: "Revisa los registros DNS de tu dominio.",
+      heading: `Hola, ${data.name}`,
+      paragraphs: [
+        `Llevamos tres días sin poder comprobar que <strong>${e(data.domain)}</strong> apunta a la web de <strong>${e(data.clinicName)}</strong>.`,
+        "Suele pasar al cambiar de proveedor o al editar los registros DNS. En Mi web → Dirección verás qué registro falta.",
+      ],
+      button,
+      note,
+    }),
+    text: renderText(
+      [`Hola, ${data.name}:`, `Llevamos tres días sin poder comprobar que ${data.domain} apunta a la web de ${data.clinicName}.`, "En Mi web → Dirección verás qué registro falta.", note],
+      button,
+    ),
+  };
+}
+
+function domainPending(data: DomainData): RenderedEmail {
+  const subject = `Tu dominio ${data.domain} aún no está conectado`;
+  const button = { label: "Ver los pasos", url: data.url };
+  const note = "Si no se conecta en 30 días, lo quitaremos de tu web. Puedes volver a añadirlo cuando quieras.";
+  return {
+    subject,
+    html: renderLayout({
+      preheader: "Faltan registros DNS por añadir.",
+      heading: `Hola, ${data.name}`,
+      paragraphs: [
+        `Hace una semana añadiste <strong>${e(data.domain)}</strong> a la web de <strong>${e(data.clinicName)}</strong>, pero todavía no apunta a ella.`,
+        "En Mi web → Dirección tienes los registros que hay que añadir en tu proveedor de dominio. Si prefieres que lo hagamos nosotros, escríbenos.",
+      ],
+      button,
+      note,
+    }),
+    text: renderText(
+      [`Hola, ${data.name}:`, `Hace una semana añadiste ${data.domain} a la web de ${data.clinicName}, pero todavía no apunta a ella.`, "En Mi web → Dirección tienes los registros que hay que añadir.", note],
+      button,
+    ),
+  };
+}
+
 export const templates = {
+  domainConnected,
+  domainBroken,
+  domainPending,
   invitation,
   welcome,
   resetPassword,

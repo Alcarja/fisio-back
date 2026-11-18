@@ -35,3 +35,7 @@ export const subdomainUrl = (subdomain: string) =>
 
 // Where the preview is served: the base host itself (https://sites.kineflow.es)
 export const previewOrigin = () => `${publicProtocol()}://${siteBaseDomain()}${publicSuffix()}`;
+
+// A clinic's own connected domain (https://activapilates.es). No port: own
+// domains only exist behind Caddy
+export const domainUrl = (hostname: string) => `${publicProtocol()}://${hostname}`;
