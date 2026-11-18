@@ -6,6 +6,10 @@ import SerenaHome from "./serena/Home.js";
 import SerenaLayout from "./serena/Layout.js";
 import * as serenaPages from "./serena/pages.js";
 import serenaCss from "./serena/style.js";
+import PulsoHome from "./pulso/Home.js";
+import PulsoLayout from "./pulso/Layout.js";
+import * as pulsoPages from "./pulso/pages.js";
+import pulsoCss from "./pulso/style.js";
 import type { SiteTemplateModule } from "./types.js";
 import VitalHome from "./vital/Home.js";
 import VitalLayout from "./vital/Layout.js";
@@ -30,6 +34,7 @@ const TEMPLATES: Record<string, SiteTemplateModule> = {
   clara,
   serena: { Layout: SerenaLayout, Home: SerenaHome, pages: pagesOf(serenaPages), css: serenaCss },
   vital: { Layout: VitalLayout, Home: VitalHome, pages: pagesOf(vitalPages), css: vitalCss },
+  pulso: { Layout: PulsoLayout, Home: PulsoHome, pages: pagesOf(pulsoPages), css: pulsoCss },
 };
 
 export const getTemplate = (key: string): SiteTemplateModule => TEMPLATES[key] ?? clara;
