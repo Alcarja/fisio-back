@@ -1,107 +1,89 @@
-import { firstSentence, paragraphs, telHref } from "../shared/format.js";
 import type { SitePageProps } from "../types.js";
 import {
-  AboutSection,
-  Badges,
-  counter,
-  FaqDark,
-  LineArt,
-  Pill,
-  ServicesSection,
-  StackBars,
+  ArrowLink,
+  BigCta,
+  FaqPanel,
+  NameStrip,
+  Panel,
+  PillLink,
+  ServicesPanel,
+  SplitTitle,
+  Statement,
+  StatusLine,
   TeamSection,
-  TwoTone,
-  VisitSection,
   Wrap,
 } from "./sections.js";
 
-const HOME_SERVICES = 6;
+const HOME_SERVICES = 4;
 
-// Pulso: a huge two-tone headline over a line drawing, a full-bleed photo,
-// a two-tone statement with badges, the questions in a dark section, the
-// treatments as numbered rows, the team in grey, "nosotros" on a fresh
-// gradient and the visit cards. Every block hides itself when it's empty
+// Pulso: a giant condensed headline with a circle in the clinic's colour, the
+// live status and a few facts, the treatments strip, a dark panel with the
+// treatments as project cards and the clinic's statement, the team as quote
+// cards, the questions in a cream panel and a huge call to action
 export default function Home({ props }: { props: SitePageProps }) {
-  const { content, services, team, img, link, bookingUrl } = props;
+  const { content, services, team, link, bookingUrl } = props;
   const { sections, hero, about, faq, contact, highlights } = content;
-  const cover = img(content.coverId);
-  const next = counter();
   const showServices = sections.services && services.length > 0;
   const showTeam = sections.team && team.length > 0;
-  const showAbout = (sections.about && !!about?.text) || highlights.length > 0;
+  const showStatement = (sections.about && !!about?.text) || highlights.length > 0 || !!content.coverId;
 
-  // The statement: the first sentence dark, the next one grey
-  const story = sections.about && about?.text ? paragraphs(about.text)[0]! : hero.subtitle ?? "";
-  const strong = firstSentence(story);
-  const soft = story.slice(strong.length).trim();
+  const facts = [
+    showServices && { label: "Tratamientos", value: String(services.length) },
+    showTeam && { label: "Equipo", value: team.length === 1 ? "1 fisio" : `${team.length} fisios` },
+    contact.city && { label: "Dónde", value: contact.city },
+  ].filter((f): f is { label: string; value: string } => !!f);
 
   return (
     <>
-      <section className="relative overflow-hidden pt-16 md:pt-24">
-        <Wrap>
-          <h1 className="m-0 text-[clamp(2.7rem,8.6vw,8.2rem)] leading-[.98] font-semibold tracking-[-.035em]">
-            <TwoTone text={hero.title} />
+      <section className="relative overflow-hidden pt-10 md:pt-16">
+        <Wrap className="relative">
+          <span className="s8-grain s8-circle pointer-events-none absolute top-[-2.5rem] right-[-3.5rem] z-10 aspect-square w-[clamp(10rem,31vw,28rem)] rounded-full bg-primary mix-blend-multiply md:top-[4%] md:right-0" aria-hidden="true" />
+          <h1 className="s8-display relative m-0 max-w-[12ch] text-[clamp(3.6rem,12.4vw,12.5rem)] leading-[.86] text-ink">
+            <SplitTitle text={hero.title} />
           </h1>
-        </Wrap>
-        <Wrap className="relative mt-12 grid items-end gap-10 pb-12 lg:mt-16 lg:grid-cols-[1.3fr_1fr]">
-          <div>
-            <p className="m-0 text-[clamp(1.5rem,3vw,2.6rem)] leading-[1.15] font-normal tracking-[.04em] text-ink uppercase">
-              Fisioterapia{contact.city ? ` en ${contact.city}` : ""}.
-            </p>
-            <div className="mt-2 flex items-center gap-6">
-              <StackBars />
-              <p className="m-0 text-[clamp(1.5rem,3vw,2.6rem)] leading-[1.15] font-normal tracking-[.04em] text-ink uppercase">A tu ritmo.</p>
-            </div>
-            <div className="mt-10 flex flex-wrap gap-4">
-              {bookingUrl && <Pill href={link(bookingUrl)}>Pide cita</Pill>}
-              {contact.phone && (
-                <Pill href={telHref(contact.phone)} tone={bookingUrl ? "outline" : "primary"}>
-                  {contact.phone}
-                </Pill>
-              )}
+          <div className="mt-12 border-t border-[#cfccc5] pt-4">
+            <StatusLine props={props} />
+          </div>
+          <div className="grid gap-12 pt-10 pb-6 lg:grid-cols-[1fr_auto] lg:items-end">
+            {facts.length > 0 && (
+              <dl className="m-0 flex flex-wrap gap-x-16 gap-y-6">
+                {facts.map((f) => (
+                  <div key={f.label} className="flex flex-col-reverse gap-2">
+                    <dd className="s8-serif m-0 text-[clamp(1.6rem,2.4vw,2.1rem)] leading-none text-ink">{f.value}</dd>
+                    <dt className="text-[.72rem] tracking-[.1em] text-[#6b6964] uppercase">{f.label}</dt>
+                  </div>
+                ))}
+              </dl>
+            )}
+            <div className="max-w-[30rem]">
+              {hero.subtitle && <p className="m-0 text-[1.15rem] leading-relaxed text-ink">{hero.subtitle}</p>}
+              <div className="mt-6 flex flex-wrap items-center gap-6">
+                {bookingUrl && <PillLink href={link(bookingUrl)}>Reserva tu cita</PillLink>}
+                {showServices && <ArrowLink href={link("/servicios")}>Nuestros tratamientos</ArrowLink>}
+              </div>
             </div>
           </div>
-          <LineArt className="w-full max-w-[40rem] justify-self-end" />
         </Wrap>
+        {showServices && <NameStrip names={services.map((s) => s.name)} />}
       </section>
 
-      {cover ? (
-        <div className="h-[clamp(16rem,38vw,34rem)] w-full overflow-hidden">
-          <img src={cover} alt="" className="size-full object-cover" />
-        </div>
-      ) : (
-        <div className="pu-band h-[clamp(10rem,22vw,18rem)] w-full" aria-hidden="true" />
+      {(showServices || showStatement) && (
+        <Panel tone="dark" id="servicios">
+          {showServices && <ServicesPanel props={props} services={services.slice(0, HOME_SERVICES)} more />}
+          {showServices && showStatement && <div className="mx-5 my-20 border-t border-white/12 md:mx-[3.75rem] md:my-28" />}
+          {showStatement && (
+            <div id="nosotros">
+              <Statement props={props} more />
+            </div>
+          )}
+        </Panel>
       )}
 
-      {story && (
-        <section className="py-20 md:py-28">
-          <Wrap className="grid items-center gap-12 lg:grid-cols-[1.4fr_1fr] lg:gap-24">
-            <div>
-              <p className="m-0 text-[clamp(1.4rem,2.4vw,2.05rem)] leading-[1.35] font-semibold text-ink">
-                {strong} {soft && <span className="text-[#7a7a7a]">{soft}</span>}
-              </p>
-              {bookingUrl && (
-                <div className="mt-10">
-                  <Pill href={link(bookingUrl)}>Reserva tu cita</Pill>
-                </div>
-              )}
-            </div>
-            <div className="lg:justify-self-end">
-              <Badges props={props} />
-            </div>
-          </Wrap>
-        </section>
-      )}
+      {showTeam && <TeamSection props={props} max={3} />}
 
-      {sections.faq && faq.length > 0 && <FaqDark props={props} index={next()} />}
+      {sections.faq && faq.length > 0 && <FaqPanel props={props} />}
 
-      {showServices && <ServicesSection props={props} index={next()} services={services.slice(0, HOME_SERVICES)} more />}
-
-      {showTeam && <TeamSection props={props} index={next()} />}
-
-      {showAbout && <AboutSection props={props} index={next()} more />}
-
-      <VisitSection props={props} index={next()} />
+      <BigCta props={props} />
     </>
   );
 }

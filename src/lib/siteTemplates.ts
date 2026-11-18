@@ -40,8 +40,22 @@ export const SITE_TEMPLATES: readonly SiteTemplate[] = [
     key: "pulso",
     label: "Pulso",
     description:
-      "Limpia y segura, estilo agencia: titulares enormes en dos tonos, filas numeradas y un toque de color neón.",
-    // Private until it's offered to everyone: only clinics with customTemplate = "pulso"
+      "Estilo estudio independiente: titulares gigantes condensados, un gran círculo en tu color y paneles redondeados.",
+    public: true,
+  },
+  {
+    key: "zen",
+    label: "Zen",
+    description:
+      "Minimalista y serena: grandes titulares en serif, mucho aire y detalles que respiran en tu color. Para clínicas que transmiten calma.",
+    public: true,
+  },
+  {
+    key: "norte",
+    label: "Norte",
+    description:
+      "Moderna y directa: paneles redondeados, precios a la vista y reserva siempre a mano. Para clínicas con un enfoque profesional.",
+    // Private until it's offered to everyone: only clinics with customTemplate = "norte"
     public: true,
   },
 ];

@@ -11,80 +11,72 @@ import {
   openStatus,
   paragraphs,
   spainNow,
-  telHref,
 } from "../shared/format.js";
-import { ClockIcon, MapPinIcon, PhoneIcon, ServiceIcon, ShieldCheckIcon } from "../shared/icons.js";
-import { ArrowRight, Breadcrumb } from "../shared/ui.js";
+import { ServiceIcon } from "../shared/icons.js";
+import { Accordion, AccordionItem, ArrowRight, ArrowUpRight, Breadcrumb } from "../shared/ui.js";
 import type { SitePageProps, SiteService, SiteTeamMember } from "../types.js";
 
-// Pulso: clean, confident, agency-like. Poppins, huge two-tone headlines,
-// wide-tracked uppercase labels, hairline rows, pill buttons with an offset
-// colour shadow, and a signature of three bars (violet, mint, lime) next to
-// the clinic's own colour. Written with Tailwind classes; style.ts only has
-// fonts, gradients and the line-art animation.
+// Pulso: an independent-studio look. Warm grain paper, cream rounded panels,
+// a huge condensed uppercase headline (Anton) with its last words in a second
+// colour, a solid circle in the clinic's colour blending over it, a condensed
+// serif (Instrument Serif) for section titles and quotes, black pill buttons.
+// Written with Tailwind; style.ts has the fonts, the grain and a few classes.
 
 type P = { props: SitePageProps };
 
 // ---------- Building blocks ----------
 
 export function Wrap({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cn("mx-auto w-full max-w-[75rem] px-5 md:px-10", className)}>{children}</div>;
+  return <div className={cn("mx-auto w-full max-w-[90rem] px-5 md:px-10", className)}>{children}</div>;
 }
 
-// The signature: three short bars
-export function Bars({ className }: { className?: string }) {
+// A rounded panel inset from the page edges (dark or cream)
+export function Panel({ tone, className, children, id }: { tone: "dark" | "cream"; className?: string; children: ReactNode; id?: string }) {
   return (
-    <span className={cn("inline-flex h-[1em] items-stretch gap-[.18em]", className)} aria-hidden="true">
-      <span className="w-[.2em] rounded-[1px] bg-(--pu-violet)" />
-      <span className="w-[.2em] rounded-[1px] bg-(--pu-mint)" />
-      <span className="w-[.2em] rounded-[1px] bg-(--pu-lime)" />
+    <section id={id} className="px-2.5 md:px-5">
+      <div className={cn("rounded-[1.75rem] py-20 md:py-28", tone === "dark" ? "bg-[#141414] text-[#f3f1ec]" : "bg-(--s8-cream) text-ink", className)}>
+        {children}
+      </div>
+    </section>
+  );
+}
+
+// The second colour (style.ts): the clinic's accent, or a colour opposite its
+// main one when it has none
+export const secondColorClass = (props: SitePageProps) => (props.content.theme.accent ? "s8-accent" : "s8-auto-accent");
+
+// Two overlapping circles (the brand mark when there's no logo)
+export function Mark({ className }: { className?: string }) {
+  return (
+    <span className={cn("relative inline-block h-[1.15em] w-[.75em]", className)} aria-hidden="true">
+      <span className="absolute top-0 left-0 size-[.75em] rounded-full bg-(--s8-second)" />
+      <span className="absolute bottom-0 left-0 size-[.75em] rounded-full bg-primary mix-blend-multiply" />
     </span>
   );
 }
 
-// The same, lying down and stacked (hero line)
-export function StackBars({ className }: { className?: string }) {
+export function Chip({ children, tone = "ink" }: { children: ReactNode; tone?: "ink" | "dark" }) {
   return (
-    <span className={cn("flex flex-col gap-1.5", className)} aria-hidden="true">
-      <span className="h-2 w-[5.5rem] bg-(--pu-lime)" />
-      <span className="h-2 w-16 bg-(--pu-mint)" />
-      <span className="h-2 w-10 bg-(--pu-violet)" />
+    <span
+      className={cn(
+        "inline-flex h-7 items-center rounded-full px-3 text-[.72rem] font-medium tracking-[.08em] whitespace-nowrap uppercase",
+        tone === "ink" ? "bg-ink text-white" : "bg-white/10 text-white/80",
+      )}
+    >
+      {children}
     </span>
   );
 }
 
-// Section corner mark
-export function CornerBars() {
-  return (
-    <div className="mt-14 flex justify-end">
-      <Bars className="text-[1.75rem]" />
-    </div>
-  );
-}
-
-export function Eyebrow({ children, className }: { children: ReactNode; className?: string }) {
-  return <p className={cn("m-0 mb-4 text-[.76rem] font-semibold tracking-[.2em] text-primary uppercase", className)}>{children}</p>;
-}
-
-export function Rule({ className }: { className?: string }) {
-  return <span className={cn("mt-7 block h-[3px] w-16 bg-primary", className)} aria-hidden="true" />;
-}
-
-export function Title({ children, className }: { children: ReactNode; className?: string }) {
-  return (
-    <h2 className={cn("m-0 text-[clamp(2.1rem,4.4vw,3.4rem)] leading-[1.08] font-semibold tracking-[-.02em] text-ink", className)}>{children}</h2>
-  );
-}
-
-export function Pill({
+export function PillLink({
   href,
   children,
-  tone = "primary",
+  tone = "ink",
   external,
 }: {
   href: string;
   children: ReactNode;
-  tone?: "primary" | "outline";
+  tone?: "ink" | "light" | "ghost";
   external?: boolean;
 }) {
   return (
@@ -92,21 +84,20 @@ export function Pill({
       href={href}
       {...(external ? { target: "_blank", rel: "noopener" } : {})}
       className={cn(
-        "inline-flex h-[3.4rem] items-center gap-3 rounded-full px-7 text-[.84rem] font-medium tracking-[.14em] whitespace-nowrap uppercase no-underline transition-transform duration-200 hover:-translate-y-0.5",
-        tone === "primary"
-          ? "bg-primary text-primary-foreground shadow-[4px_5px_0_var(--pu-lime)]"
-          : "border-2 border-ink bg-white text-ink shadow-[4px_5px_0_var(--pu-mint)]",
+        "inline-flex h-12 items-center justify-center gap-2 rounded-full px-7 text-[.84rem] font-medium tracking-[.08em] whitespace-nowrap uppercase no-underline transition-colors duration-200",
+        tone === "ink" && "bg-ink text-white hover:bg-primary hover:text-primary-foreground",
+        tone === "light" && "bg-(--s8-cream) text-ink hover:bg-white",
+        tone === "ghost" && "bg-white/10 text-white hover:bg-white/20",
       )}
     >
-      <Bars className="text-[1.05rem]" />
       {children}
     </a>
   );
 }
 
-export function TextLink({ href, children }: { href: string; children: ReactNode }) {
+export function ArrowLink({ href, children, className }: { href: string; children: ReactNode; className?: string }) {
   return (
-    <a href={href} className="group inline-flex items-center gap-3 text-[.84rem] font-medium tracking-[.14em] text-ink uppercase no-underline">
+    <a href={href} className={cn("group inline-flex items-center gap-2 text-[.95rem] font-medium text-inherit no-underline", className)}>
       {children}
       <span className="transition-transform duration-200 group-hover:translate-x-1">
         <ArrowRight />
@@ -115,373 +106,341 @@ export function TextLink({ href, children }: { href: string; children: ReactNode
   );
 }
 
-export function counter() {
-  let n = 0;
-  return () => String(++n).padStart(2, "0");
-}
-
-// Splits a title in two: the first half dark, the rest light grey
-export function TwoTone({ text, className }: { text: string; className?: string }) {
-  const words = text.trim().split(/\s+/);
-  const cut = Math.max(1, Math.ceil(words.length / 2));
-  return (
-    <span className={className}>
-      <span className="text-[#4a4a4a]">{words.slice(0, cut).join(" ")}</span>{" "}
-      <span className="text-[#ababab]">{words.slice(cut).join(" ")}</span>
-    </span>
-  );
+// Condensed serif, uppercase: section titles
+export function SerifTitle({ children, className, as: Tag = "h2" }: { children: ReactNode; className?: string; as?: "h1" | "h2" | "p" }) {
+  return <Tag className={cn("s8-serif m-0 text-[clamp(2.6rem,6vw,5.4rem)] leading-[.95] text-inherit uppercase", className)}>{children}</Tag>;
 }
 
 export const statusOf = (props: SitePageProps) => (props.content.sections.hours ? openStatus(props.hours) : null);
 
-export function StatusDot({ open }: { open: boolean }) {
-  return <span className={cn("inline-block size-2 rounded-full", open ? "bg-[#22b573] shadow-[0_0_0_4px_rgba(34,181,115,.18)]" : "bg-[#b5b5b5]")} />;
-}
-
-// ---------- Hero art: original line drawing (hills, sun, cloud, a pulse) ----------
-
-export function LineArt({ className }: { className?: string }) {
+export function StatusLine({ props, className }: P & { className?: string }) {
+  const status = statusOf(props);
+  const city = props.content.contact.city;
+  if (!status && !city) return null;
   return (
-    <svg className={cn("pu-art", className)} viewBox="0 0 640 260" fill="none" aria-hidden="true">
-      <path pathLength={1} className="pu-art-mint" d="M268 74a20 20 0 0 1 37-9 25 25 0 0 1 46 7 16 16 0 0 1 1 31h-88a15 15 0 0 1 4-29z" />
-      <circle pathLength={1} className="pu-art-mint" cx="540" cy="58" r="30" />
-      <path pathLength={1} className="pu-art-violet" d="M0 250 70 168l46 52 70-96 84 126" />
-      <path pathLength={1} className="pu-art-violet pu-art-soft" d="M120 250 214 150l40 40 30-30 68 90" />
-      <path pathLength={1} className="pu-art-mint" d="M380 250 476 104l42 58 26-30 96 118" />
-      <path pathLength={1} className="pu-art-violet pu-art-strong" d="M0 214h196l18-44 22 78 26-118 24 96 16-12h338" />
-    </svg>
+    <p className={cn("m-0 inline-flex items-center gap-2 text-[.8rem] text-[#6b6964]", className)}>
+      <span className={cn("size-2 rounded-full", status?.open ? "bg-[#1fa971]" : "bg-primary")} aria-hidden="true" />
+      {status ? status.label : `Fisioterapia en ${city}`}
+      {status && city && <span className="opacity-70">· {city}</span>}
+    </p>
   );
 }
 
-// ---------- Statement + badges ----------
-
-export function Badges({ props }: P) {
-  const { content, team, hours, bookingUrl } = props;
-  const licensed = content.sections.team ? team.filter((m) => m.licenseNumber).length : 0;
-  const days = content.sections.hours ? new Set(hours.map((h) => h.weekday)).size : 0;
-  const items = [
-    content.healthRegistry && { top: "Registro sanitario", main: content.healthRegistry },
-    licensed > 0 && { top: licensed === 1 ? "Fisio" : `${licensed} fisios`, main: "Colegiados" },
-    bookingUrl && { top: "Cita online", main: "24/7" },
-    days > 0 && { top: "Abrimos", main: `${days} días` },
-  ].filter((b): b is { top: string; main: string } => !!b);
-  if (!items.length) return null;
+// Splits a title: everything dark but the last words, in the second colour
+export function SplitTitle({ text }: { text: string }) {
+  const words = text.trim().split(/\s+/);
+  const tail = words.length > 3 ? 2 : 1;
+  if (words.length < 2) return <>{text}</>;
   return (
-    <ul className="m-0 grid list-none grid-cols-2 gap-3 p-0 sm:w-[19rem]">
-      {items.map((b, i) => (
-        <li
-          key={b.top}
-          className={cn("flex min-h-24 flex-col items-center justify-center border-2 px-3 py-3 text-center", i % 2 ? "border-ink" : "border-primary")}
-        >
-          <span className={cn("text-[.7rem] font-semibold tracking-[.12em] uppercase", i % 2 ? "text-ink" : "text-primary")}>{b.top}</span>
-          <span className="mt-1 text-lg leading-tight font-semibold text-ink">{b.main}</span>
-        </li>
-      ))}
-    </ul>
+    <>
+      {words.slice(0, -tail).join(" ")} <span className="text-(--s8-second)">{words.slice(-tail).join(" ")}</span>
+    </>
   );
 }
 
-// ---------- FAQ: dark section, numbered rows ----------
+// ---------- Treatments marquee (like a strip of client logos) ----------
 
-export function FaqDark({ props, index }: P & { index?: string }) {
-  const { content, img } = props;
-  const photo = content.sections.gallery ? img(content.galleryIds[0]) : undefined;
-  const phone = content.contact.phone;
+export function NameStrip({ names }: { names: string[] }) {
+  if (names.length < 3) return null;
+  const row = [...names, ...names];
   return (
-    <section className="pu-dark relative overflow-hidden border-b-4 border-primary bg-[#141414] py-24 text-white md:py-32">
-      {photo && <img src={photo} alt="" className="absolute inset-0 size-full object-cover opacity-20 grayscale" loading="lazy" />}
-      <Wrap className="relative">
-        <Eyebrow className="text-(--pu-mint)">{index ? `${index} · ` : ""}Antes de venir</Eyebrow>
-        <Title className="text-white">
-          ¿Tienes dudas?
-          <br />
-          Es lo normal.
-        </Title>
-        <Rule />
-        <ol className="m-0 mt-12 list-none border-t border-white/15 p-0">
-          {content.faq.map((f, i) => {
-            const last = i === content.faq.length - 1;
-            return (
-              <li key={i} className="grid gap-3 border-b border-white/15 py-8 md:grid-cols-[6rem_1fr_1fr] md:gap-8">
-                <span className="pt-1.5 text-xs font-semibold tracking-[.18em] text-(--pu-violet-soft)">{String(i + 1).padStart(2, "0")}</span>
-                <h3 className={cn("m-0 text-[clamp(1.3rem,2.2vw,1.85rem)] leading-tight font-medium", last ? "text-(--pu-mint)" : "text-white")}>{f.q}</h3>
-                <div className={cn("text-[1.02rem] leading-relaxed [&_p]:m-0 [&_p+p]:mt-3", last ? "text-white" : "text-white/60")}>
-                  <Paragraphs text={f.a} />
-                </div>
+    <div className="s8-strip overflow-hidden py-10" aria-hidden="true">
+      <div className="s8-strip-track flex w-max">
+        {[0, 1].map((copy) => (
+          <ul key={copy} className="m-0 flex list-none items-center gap-16 p-0 pr-16">
+            {row.map((n, i) => (
+              <li key={i} className="flex items-center gap-3 text-[clamp(1.5rem,2.4vw,2.1rem)] font-bold tracking-[-.02em] whitespace-nowrap text-[#3d3c39] opacity-80">
+                <ServiceIcon name={n} className="size-[.9em]" />
+                {n}
               </li>
-            );
-          })}
-        </ol>
-        {phone && (
-          <p className="m-0 mt-10 max-w-2xl text-[clamp(1.2rem,2vw,1.6rem)] leading-snug font-semibold">
-            ¿Algo más? Llámanos al{" "}
-            <a href={telHref(phone)} className="text-(--pu-lime) no-underline hover:underline">
-              {phone}
-            </a>{" "}
-            y lo hablamos.
-          </p>
-        )}
-        <CornerBars />
-      </Wrap>
-    </section>
-  );
-}
-
-// ---------- Services: numbered hairline rows ----------
-
-export function ServiceRows({ services, props, full }: { services: SiteService[]; props: SitePageProps; full?: boolean }) {
-  const { bookingUrl, link } = props;
-  return (
-    <ol className="m-0 list-none border-t border-(--line) p-0">
-      {services.map((s, i) => {
-        const name = (
-          <span className="inline-flex items-baseline gap-3">
-            {s.name}
-            {bookingUrl && (
-              <span className="text-primary transition-transform duration-200 group-hover:translate-x-1">
-                <ArrowRight />
-              </span>
-            )}
-          </span>
-        );
-        return (
-          <li key={s.name} className="group grid gap-3 border-b border-(--line) py-8 md:grid-cols-[11rem_1.1fr_1fr_auto] md:items-baseline md:gap-8">
-            <span className="text-xs font-semibold tracking-[.18em] text-(--pu-violet) uppercase">
-              {String(i + 1).padStart(2, "0")} · {formatDuration(s.durationMinutes)}
-              {s.isGroup && " · grupo"}
-            </span>
-            <h3 className="m-0 text-[clamp(1.2rem,1.8vw,1.5rem)] leading-snug font-semibold text-ink">
-              {bookingUrl ? (
-                <a href={link(bookingUrl)} className="text-inherit no-underline">
-                  {name}
-                </a>
-              ) : (
-                name
-              )}
-            </h3>
-            <div className="text-[1.02rem] leading-relaxed text-[#6b6b6b] [&_p]:m-0 [&_p+p]:mt-2">
-              {s.description ? full ? <Paragraphs text={s.description} /> : <p>{firstSentence(s.description)}</p> : null}
-            </div>
-            <span className="text-xl font-semibold whitespace-nowrap text-ink md:text-right">{s.priceCents > 0 ? formatPrice(s.priceCents) : ""}</span>
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
-
-export function ServicesSection({ props, index, services, full, more }: P & { index?: string; services: SiteService[]; full?: boolean; more?: boolean }) {
-  return (
-    <section className="pu-blob relative overflow-hidden py-24 md:py-32" id="servicios">
-      <Wrap className="relative">
-        <Eyebrow>{index ? `${index} · ` : ""}Tratamientos</Eyebrow>
-        <Title>
-          Un tratamiento
-          <br />
-          para cada caso.
-        </Title>
-        <Rule />
-        <div className="mt-12">
-          <ServiceRows services={services} props={props} full={full} />
-        </div>
-        <div className="mt-8 flex flex-wrap items-center justify-between gap-6">
-          <p className="m-0 max-w-xl text-[.95rem] text-[#6b6b6b]">¿No sabes cuál es el tuyo? Empieza por una valoración y te orientamos.</p>
-          {more && <TextLink href={props.link("/servicios")}>Todos los tratamientos</TextLink>}
-        </div>
-        <CornerBars />
-      </Wrap>
-    </section>
-  );
-}
-
-// ---------- Team: grey section, photo + roster panel ----------
-
-function Roster({ team }: { team: SiteTeamMember[] }) {
-  return (
-    <div className="rounded-2xl bg-[#ebebe8] p-6">
-      <p className="m-0 mb-4 text-[.72rem] font-semibold tracking-[.2em] text-[#777] uppercase">Nuestro equipo</p>
-      <ul className="m-0 flex list-none flex-col gap-3 p-0">
-        {team.map((m) => (
-          <li key={m.name} className="flex items-center gap-4 rounded-full bg-white py-2.5 pr-5 pl-2.5">
-            <span className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary-soft text-sm font-semibold text-primary">
-              {m.photoUrl ? <img src={m.photoUrl} alt="" className="size-full object-cover" loading="lazy" /> : initials(m.name)}
-            </span>
-            <span className="flex min-w-0 flex-col leading-tight">
-              <span className="font-medium text-ink">{m.name}</span>
-              {m.headline && <span className="truncate text-[.82rem] text-[#777]">{m.headline}</span>}
-            </span>
-            {m.licenseNumber && (
-              <span className="ml-auto hidden items-center gap-1.5 text-[.72rem] font-semibold tracking-[.08em] text-[#777] uppercase sm:inline-flex">
-                <ShieldCheckIcon className="size-3.5 text-primary" />
-                {m.licenseNumber}
-              </span>
-            )}
-          </li>
+            ))}
+          </ul>
         ))}
-      </ul>
+      </div>
     </div>
   );
 }
 
-const NEXT = [
-  { bar: "bg-(--pu-violet)", title: "Valoración", text: "Escuchamos, exploramos y buscamos el origen del problema, no solo dónde duele." },
-  { bar: "bg-(--pu-mint)", title: "Tratamiento", text: "Terapia manual, ejercicio y las técnicas que mejor encajen contigo." },
-  { bar: "bg-(--pu-lime)", title: "Seguimiento", text: "Te llevas ejercicios para casa y revisamos juntos cómo avanzas." },
+// ---------- Treatments: project-style cards on the dark panel ----------
+
+// Each card's tile gets one of these backgrounds, in turn
+const TILES = [
+  "linear-gradient(180deg, color-mix(in srgb, var(--primary) 92%, white), color-mix(in srgb, var(--primary) 55%, black))",
+  "radial-gradient(70% 60% at 50% 100%, color-mix(in srgb, var(--s8-second) 80%, transparent), transparent), #16161f",
+  "radial-gradient(60% 70% at 30% 30%, color-mix(in srgb, var(--s8-second) 55%, white), transparent), radial-gradient(60% 70% at 70% 80%, color-mix(in srgb, var(--primary) 45%, white), transparent), #f1eee8",
+  "linear-gradient(160deg, #1d2b3a, #0f1720)",
 ];
 
-export function TeamSection({ props, index }: P & { index?: string }) {
-  const { team, link, bookingUrl, content } = props;
-  const lead = team.find((m) => m.photoUrl);
+export function ServiceCards({ services, props, full }: { services: SiteService[]; props: SitePageProps; full?: boolean }) {
+  const { bookingUrl, link } = props;
   return (
-    <section className="bg-(--pu-gray) py-24 md:py-32" id="equipo">
-      <Wrap>
-        <div className="grid gap-14 lg:grid-cols-2 lg:gap-20">
-          <div>
-            <Eyebrow>{index ? `${index} · ` : ""}Equipo</Eyebrow>
-            <Title>
-              Las personas que
-              <br />
-              te van a tratar.
-            </Title>
-            <Rule />
-            <p className="m-0 mt-8 text-[1.3rem] leading-normal text-ink">
-              {team.length === 1 ? "Una fisioterapeuta" : `${team.length} fisioterapeutas`}, cada uno con su especialidad y el mismo objetivo: que vuelvas a moverte sin dolor.
-            </p>
-            <p className="m-0 mt-5 leading-relaxed text-[#6b6b6b]">
-              Te atiende siempre un profesional colegiado. <strong className="text-[#4a4a4a]">Y te explica lo que hace:</strong> sabrás qué te pasa y por qué.
-            </p>
-            {lead?.photoUrl && <img src={lead.photoUrl} alt={lead.name} className="mt-10 aspect-[16/10] w-full rounded-2xl object-cover" loading="lazy" />}
+    <ul className="m-0 grid list-none gap-x-10 gap-y-14 p-0 md:grid-cols-2">
+      {services.map((s, i) => {
+        const light = i % TILES.length === 2;
+        const tile = (
+          <div
+            className="s8-grain relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-xl transition-transform duration-500 group-hover:scale-[1.015]"
+            style={{ background: TILES[i % TILES.length] }}
+          >
+            <span className={cn("flex items-center gap-4 px-8 text-center text-[clamp(1.6rem,3vw,2.6rem)] font-bold tracking-[-.03em]", light ? "text-ink" : "text-white")}>
+              <ServiceIcon name={s.name} description={s.description} className="size-[1em] shrink-0" />
+              {s.name}
+            </span>
+            {bookingUrl && (
+              <span className="absolute top-4 right-4 flex size-11 items-center justify-center rounded-full bg-white text-ink opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+                <ArrowUpRight />
+              </span>
+            )}
           </div>
-          <div className="flex flex-col gap-5">
-            <Roster team={team} />
-            <div className="relative rounded-2xl border border-[#dcdcd8] bg-white p-6">
-              <span className="absolute top-0 left-6 h-1 w-14 bg-(--pu-lime)" aria-hidden="true" />
-              <p className="m-0 text-[.72rem] font-semibold tracking-[.2em] text-[#777] uppercase">Tu primera visita</p>
-              <p className="m-0 mt-4 text-[1.25rem] leading-snug font-medium text-ink">“Vengo a que me valoréis y me digáis qué me pasa y cómo lo trabajamos.”</p>
-            </div>
-            <div className="flex flex-wrap items-center gap-6">
-              {bookingUrl ? (
-                <Pill href={link(bookingUrl)}>Pide cita</Pill>
-              ) : (
-                content.contact.phone && <Pill href={telHref(content.contact.phone)}>Llámanos</Pill>
+        );
+        return (
+          <li key={s.name} className="group">
+            {bookingUrl ? (
+              <a href={link(bookingUrl)} className="block text-inherit no-underline" aria-label={`Reservar ${s.name}`}>
+                {tile}
+              </a>
+            ) : (
+              tile
+            )}
+            <div className="mt-5 grid gap-4 sm:grid-cols-[1fr_1.3fr]">
+              <div>
+                <h3 className="m-0 font-sans text-[1.35rem] font-normal text-white">{s.name}</h3>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Chip tone="dark">{formatDuration(s.durationMinutes)}</Chip>
+                  {s.isGroup && <Chip tone="dark">En grupo</Chip>}
+                  {s.priceCents > 0 && <Chip tone="dark">{formatPrice(s.priceCents)}</Chip>}
+                </div>
+              </div>
+              {s.description && (
+                <div className="s8-serif text-[1.3rem] leading-snug text-white/65 [&_p]:m-0 [&_p+p]:mt-2">
+                  {full ? <Paragraphs text={s.description} /> : <p>{firstSentence(s.description)}</p>}
+                </div>
               )}
-              <TextLink href={link("/equipo")}>Conoce al equipo</TextLink>
             </div>
-          </div>
-        </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
-        <div className="mt-20 grid gap-10 border-t border-[#dcdcd8] pt-14 lg:grid-cols-[1fr_1.4fr] lg:gap-20">
-          <div>
-            <Eyebrow>¿Y después?</Eyebrow>
-            <Title className="text-[clamp(1.8rem,3.4vw,2.6rem)]">Contigo hasta el alta, no solo una sesión.</Title>
-          </div>
-          <ul className="m-0 grid list-none gap-8 p-0 sm:grid-cols-3">
-            {NEXT.map((n) => (
-              <li key={n.title} className="border-t border-[#dcdcd8] pt-5">
-                <span className={cn("mb-4 block h-1 w-8", n.bar)} aria-hidden="true" />
-                <h3 className="m-0 text-[1.2rem] font-semibold text-ink">{n.title}</h3>
-                <p className="m-0 mt-2 text-[.95rem] leading-relaxed text-[#6b6b6b]">{n.text}</p>
-              </li>
-            ))}
-          </ul>
+export function ServicesPanel({ props, services, more, full }: P & { services: SiteService[]; more?: boolean; full?: boolean }) {
+  return (
+    <Wrap className="px-5 md:px-[3.75rem]">
+      <div className="mb-14 flex flex-col items-center gap-8 text-center">
+        <SerifTitle>Tratamientos</SerifTitle>
+        {more && (
+          <PillLink href={props.link("/servicios")} tone="ghost">
+            Ver todos
+          </PillLink>
+        )}
+      </div>
+      <ServiceCards services={services} props={props} full={full} />
+    </Wrap>
+  );
+}
+
+// ---------- About statement (inside the dark panel) ----------
+
+export function Statement({ props, more }: P & { more?: boolean }) {
+  const { content, img, link } = props;
+  const { about, highlights, sections } = content;
+  const cover = img(content.coverId);
+  const showAbout = sections.about && !!about?.text;
+  const text = showAbout ? paragraphs(about?.text)[0] : content.hero.subtitle;
+  return (
+    <Wrap className="px-5 text-center md:px-[3.75rem]">
+      {cover && <img src={cover} alt="" className="mb-16 aspect-[21/9] w-full rounded-xl object-cover" loading="lazy" />}
+      <SerifTitle className="mx-auto max-w-[18ch]">{(showAbout && about?.title) || "Una clínica que te escucha"}</SerifTitle>
+      {text && <p className="mx-auto mt-8 mb-0 max-w-[48rem] text-[clamp(1.05rem,1.6vw,1.25rem)] leading-relaxed text-white/70">{text}</p>}
+      {highlights.length > 0 && (
+        <ul className="m-0 mx-auto mt-9 flex max-w-[52rem] list-none flex-wrap justify-center gap-2.5 p-0">
+          {highlights.map((h, i) => (
+            <li key={i}>
+              <Chip tone="dark">{h.title}</Chip>
+            </li>
+          ))}
+        </ul>
+      )}
+      {more && (
+        <div className="mt-10">
+          <PillLink href={link("/nosotros")} tone="light">
+            Conócenos
+          </PillLink>
         </div>
-        <CornerBars />
+      )}
+    </Wrap>
+  );
+}
+
+// ---------- Team: quote cards + a stat card ----------
+
+function TeamCard({ member, full }: { member: SiteTeamMember; full?: boolean }) {
+  const quote = full ? member.bio : firstSentence(member.bio);
+  return (
+    <li className="flex flex-col justify-between gap-10 rounded-[1.25rem] bg-(--s8-cream) p-8 md:p-10">
+      {quote ? (
+        <div className="s8-serif text-[clamp(1.35rem,2vw,1.75rem)] leading-[1.25] text-ink [&_p]:m-0 [&_p+p]:mt-3">
+          {full ? <Paragraphs text={`“${quote}”`} /> : <p>“{quote}”</p>}
+        </div>
+      ) : (
+        <span className="s8-display text-[5rem] leading-none text-primary">{initials(member.name)}</span>
+      )}
+      <div className="flex items-center gap-4">
+        <span className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary text-sm font-medium text-primary-foreground">
+          {member.photoUrl ? <img src={member.photoUrl} alt="" className="size-full object-cover" loading="lazy" /> : initials(member.name)}
+        </span>
+        <span className="flex flex-col">
+          <span className="text-[1rem] text-ink">{member.name}</span>
+          <span className="text-[.72rem] tracking-[.08em] text-[#7a7873] uppercase">
+            {[member.headline, member.licenseNumber && `Col. ${member.licenseNumber}`].filter(Boolean).join(" · ")}
+          </span>
+        </span>
+      </div>
+    </li>
+  );
+}
+
+export function TeamSection({ props, full, max }: P & { full?: boolean; max?: number }) {
+  const { team, services, content, link } = props;
+  const shown = max ? team.slice(0, max) : team;
+  const licensed = team.filter((m) => m.licenseNumber).length;
+  const big = licensed || team.length;
+  return (
+    <section className="py-24 md:py-32" id="equipo">
+      <Wrap className="md:px-[3.75rem]">
+        <Chip>Equipo</Chip>
+        <div className="mt-6 mb-14 flex flex-wrap items-end justify-between gap-8">
+          <SerifTitle className="max-w-[16ch]">Las manos que te van a cuidar.</SerifTitle>
+          {!full && <PillLink href={link("/equipo")}>Conoce al equipo</PillLink>}
+        </div>
+        <ul className="m-0 grid list-none gap-6 p-0 md:grid-cols-2">
+          {shown.map((m) => (
+            <TeamCard key={m.name} member={m} full={full} />
+          ))}
+          <li className="s8-grain flex flex-col justify-between gap-10 rounded-[1.25rem] bg-(--s8-second) p-8 md:p-10">
+            <span className="s8-display text-[clamp(6rem,12vw,10rem)] leading-[.8] text-ink">
+              {big}
+            </span>
+            <p className="m-0 max-w-sm text-[1.15rem] leading-snug text-ink">
+              {licensed ? (licensed === 1 ? "Fisioterapeuta colegiado" : "Fisioterapeutas colegiados") : team.length === 1 ? "Fisioterapeuta" : "Fisioterapeutas"}
+              {content.sections.services && services.length > 0 ? ` y ${services.length} tratamientos para que vuelvas a moverte sin dolor.` : "."}
+            </p>
+          </li>
+        </ul>
       </Wrap>
     </section>
   );
 }
 
-// Equipo page: one card per person, with the full bio
-export function TeamCards({ team }: { team: SiteTeamMember[] }) {
+// ---------- FAQ (cream panel) ----------
+
+export function FaqPanel({ props }: P) {
   return (
-    <ul className="m-0 grid list-none gap-6 p-0 sm:grid-cols-2 lg:grid-cols-3">
-      {team.map((m) => (
-        <li key={m.name} className="overflow-hidden rounded-2xl border border-[#dcdcd8] bg-white">
-          <div className="relative aspect-[4/5] bg-primary-soft">
-            {m.photoUrl ? (
-              <img src={m.photoUrl} alt={m.name} className="size-full object-cover" loading="lazy" />
-            ) : (
-              <span className="absolute inset-0 flex items-center justify-center text-6xl font-semibold text-primary">{initials(m.name)}</span>
-            )}
-          </div>
-          <div className="relative p-6">
-            <span className="absolute top-0 left-6 h-1 w-10 bg-primary" aria-hidden="true" />
-            <h3 className="m-0 text-[1.3rem] font-semibold text-ink">{m.name}</h3>
-            {m.headline && <p className="m-0 mt-1 text-[.95rem] font-medium text-primary">{m.headline}</p>}
-            {m.bio && (
-              <div className="mt-4 text-[.98rem] leading-relaxed text-[#6b6b6b] [&_p]:m-0 [&_p+p]:mt-2">
-                <Paragraphs text={m.bio} />
-              </div>
-            )}
-            {m.licenseNumber && (
-              <p className="m-0 mt-5 inline-flex items-center gap-1.5 text-[.72rem] font-semibold tracking-[.12em] text-[#777] uppercase">
-                <ShieldCheckIcon className="size-3.5 text-primary" />
-                Colegiado nº {m.licenseNumber}
-              </p>
-            )}
-          </div>
+    <Panel tone="cream" id="preguntas">
+      <Wrap className="grid gap-12 md:px-[3.75rem] lg:grid-cols-[.8fr_1.2fr] lg:gap-20">
+        <div>
+          <Chip>Preguntas</Chip>
+          <SerifTitle className="mt-6">Antes de tu primera visita.</SerifTitle>
+        </div>
+        <Accordion className="s8-faq">
+          {props.content.faq.map((f, i) => (
+            <AccordionItem key={i} title={f.q}>
+              <Paragraphs text={f.a} />
+            </AccordionItem>
+          ))}
+        </Accordion>
+      </Wrap>
+    </Panel>
+  );
+}
+
+// ---------- Big call to action ----------
+
+export function BigCta({ props }: P) {
+  const { bookingUrl, link, content } = props;
+  const phone = content.contact.phone;
+  if (!bookingUrl && !phone) return null;
+  return (
+    <section className="py-24 text-center md:py-36">
+      <Wrap>
+        <p className="s8-display m-0 text-[clamp(3.4rem,10vw,9.5rem)] leading-[.86]">
+          ¿Algo te duele?
+          <br />
+          Empecemos.
+        </p>
+        <div className="mt-10 flex flex-wrap justify-center gap-3">
+          {bookingUrl && <PillLink href={link(bookingUrl)}>Pide cita</PillLink>}
+          {phone && (
+            <a href={`tel:${phone.replace(/[^\d+]/g, "")}`} className="inline-flex h-12 items-center rounded-full border border-ink px-7 text-[.84rem] font-medium tracking-[.08em] text-ink uppercase no-underline hover:bg-ink hover:text-white">
+              {phone}
+            </a>
+          )}
+        </div>
+      </Wrap>
+    </section>
+  );
+}
+
+// ---------- Hours (footer, contact page) ----------
+
+export function HoursList({ hours, className }: { hours: SitePageProps["hours"]; className?: string }) {
+  const today = spainNow().weekday;
+  return (
+    <ul className={cn("m-0 list-none p-0", className)}>
+      {hoursByDay(hours).map((d, i) => (
+        <li key={d.label} className={cn("flex justify-between gap-6 border-b border-[#dedbd4] py-2 text-[.92rem] last:border-0", i + 1 === today ? "font-medium text-ink" : "text-[#6b6964]")}>
+          <span>
+            {d.label}
+            {i + 1 === today && <span className="ml-2 rounded-full bg-ink px-2 py-0.5 text-[.65rem] tracking-[.08em] text-white uppercase">Hoy</span>}
+          </span>
+          <span className="tabular-nums">{d.ranges.length ? d.ranges.join(" · ") : "Cerrado"}</span>
         </li>
       ))}
     </ul>
   );
 }
 
-// ---------- About: gradient section, statement + highlight cards ----------
+// ---------- Contact block (contact page) ----------
 
-export function AboutSection({ props, index, more }: P & { index?: string; more?: boolean }) {
-  const { content, link } = props;
-  const { about, highlights, sections } = content;
-  const showAbout = sections.about && !!about?.text;
-  const paras = paragraphs(about?.text);
-  const lead = firstSentence(about?.text);
-  const rest = (paras[0] ?? "").slice(lead.length).trim();
+export function ContactPanel({ props }: P) {
+  const { content, hours } = props;
+  const c = content.contact;
+  const address = fullAddress(c);
   return (
-    <section className="pu-fresh relative overflow-hidden py-24 md:py-32" id="nosotros">
-      <Wrap className="relative grid gap-14 lg:grid-cols-2 lg:gap-20">
+    <Panel tone="cream" id="contacto">
+      <Wrap className="grid gap-14 md:px-[3.75rem] lg:grid-cols-2 lg:gap-20">
         <div>
-          <Eyebrow>{index ? `${index} · ` : ""}Nosotros</Eyebrow>
-          <Title>{(showAbout && about?.title) || "Una clínica que se toma su tiempo."}</Title>
-          <Rule />
-          {showAbout && (
-            <>
-              <p className="m-0 mt-10 text-[1.4rem] leading-snug font-semibold text-ink">{lead}</p>
-              {rest && <p className="m-0 mt-5 text-[1.05rem] leading-relaxed text-[#4a4a4a]">{rest}</p>}
-              {paras.slice(1).map((p, i) => (
-                <p key={i} className={cn("m-0 mt-4 text-[1.05rem] leading-relaxed text-[#4a4a4a]", more && "hidden")}>
-                  {p}
-                </p>
-              ))}
-            </>
-          )}
-          {more && (
-            <div className="mt-10">
-              <TextLink href={link("/nosotros")}>Más sobre nosotros</TextLink>
+          <Chip>Contacto</Chip>
+          <SerifTitle className="mt-6">{address ? "Ven a vernos." : "Escríbenos."}</SerifTitle>
+          {address && <p className="s8-serif m-0 mt-6 text-[1.7rem] leading-snug text-ink">{address}</p>}
+          <div className="mt-8 text-[1.05rem] [&_.kf-contact]:gap-3 [&_a]:text-ink [&_a]:no-underline [&_a:hover]:text-primary">
+            <ContactList content={{ ...content, contact: { ...c, address: undefined, postalCode: undefined, city: undefined } }} />
+          </div>
+          {c.mapsUrl && (
+            <div className="mt-8">
+              <PillLink href={c.mapsUrl} external>
+                Cómo llegar
+              </PillLink>
             </div>
           )}
         </div>
-        {highlights.length > 0 && (
+        {content.sections.hours && hours.length > 0 && (
           <div>
-            <Eyebrow>Por qué nosotros</Eyebrow>
-            <ul className="m-0 flex list-none flex-col gap-3 p-0">
-              {highlights.map((h, i) => (
-                <li key={i} className="rounded-2xl border border-[#dcdcd8] bg-white/85 px-7 py-6 backdrop-blur-sm">
-                  <h3 className="m-0 text-[1.2rem] font-semibold text-ink">{h.title}</h3>
-                  {h.text && <p className="m-0 mt-1.5 text-[.95rem] leading-relaxed text-[#6b6b6b]">{h.text}</p>}
-                </li>
-              ))}
-            </ul>
+            <StatusLine props={props} className="mb-5 text-[.95rem]" />
+            <HoursList hours={hours} className="[&_li]:py-3 [&_li]:text-[1rem]" />
           </div>
         )}
       </Wrap>
-    </section>
+    </Panel>
   );
 }
 
-export function GalleryGrid({ images }: { images: string[] }) {
+export function Gallery({ images }: { images: string[] }) {
   return (
     <ul className="m-0 grid list-none grid-cols-2 gap-4 p-0 md:grid-cols-3">
       {images.map((src, i) => (
-        <li key={src} className={cn("overflow-hidden rounded-2xl", i === 0 && "md:col-span-2 md:row-span-2")}>
+        <li key={src} className={cn("overflow-hidden rounded-xl", i === 0 && "col-span-2 row-span-2")}>
           <img src={src} alt="" className="aspect-square size-full object-cover" loading="lazy" />
         </li>
       ))}
@@ -489,97 +448,20 @@ export function GalleryGrid({ images }: { images: string[] }) {
   );
 }
 
-// ---------- Visit: three cards + treatment chips ----------
-
-export function VisitSection({ props, index }: P & { index?: string }) {
-  const { content, hours, services, link } = props;
-  const c = content.contact;
-  const address = fullAddress(c);
-  const status = statusOf(props);
-  const today = spainNow().weekday;
-  const todayRanges = content.sections.hours ? hoursByDay(hours)[today - 1]?.ranges ?? [] : [];
-  const chips = content.sections.services ? services.map((s) => s.name) : content.highlights.map((h) => h.title);
-  const card = "relative flex flex-col rounded-2xl border border-[#dcdcd8] bg-white p-7";
-  return (
-    <section className="pu-ferns relative overflow-hidden py-24 md:py-32" id="contacto">
-      <Wrap className="relative">
-        <Eyebrow>{index ? `${index} · ` : ""}Ven a vernos</Eyebrow>
-        <Title>Estamos aquí.</Title>
-        <Rule />
-        <div className="mt-12 grid gap-4 md:grid-cols-3">
-          <div className={card}>
-            <span className="mb-6 flex size-12 items-center justify-center rounded-full bg-(--pu-mint)/35 text-ink">
-              <MapPinIcon className="size-6" />
-            </span>
-            <h3 className="m-0 text-[1.35rem] font-semibold text-ink">Dirección</h3>
-            <p className="m-0 mt-2 text-[#6b6b6b]">{address || "Escríbenos y te contamos cómo llegar."}</p>
-            {c.mapsUrl && (
-              <div className="mt-auto pt-6">
-                <TextLink href={c.mapsUrl}>Cómo llegar</TextLink>
-              </div>
-            )}
-          </div>
-          <div className={card}>
-            <span className="mb-6 flex size-12 items-center justify-center rounded-full bg-(--pu-lime)/50 text-ink">
-              <ClockIcon className="size-6" />
-            </span>
-            <h3 className="m-0 text-[1.35rem] font-semibold text-ink">Horario</h3>
-            {status ? (
-              <p className="m-0 mt-2 inline-flex items-center gap-2.5 font-medium text-ink">
-                <StatusDot open={status.open} />
-                {status.label}
-              </p>
-            ) : (
-              <p className="m-0 mt-2 text-[#6b6b6b]">Con cita previa.</p>
-            )}
-            {todayRanges.length > 0 && <p className="m-0 mt-1 text-[#6b6b6b]">Hoy: {todayRanges.join(" · ")}</p>}
-            <div className="mt-auto pt-6">
-              <TextLink href={link("/contacto")}>Ver horario completo</TextLink>
-            </div>
-          </div>
-          <div className={card}>
-            <span className="mb-6 flex size-12 items-center justify-center rounded-full bg-(--pu-violet)/15 text-ink">
-              <PhoneIcon className="size-6" />
-            </span>
-            <h3 className="m-0 text-[1.35rem] font-semibold text-ink">Contacto</h3>
-            <div className="mt-3 text-[.98rem] [&_.kf-contact]:gap-2 [&_a]:text-ink [&_a]:no-underline [&_a:hover]:text-primary">
-              <ContactList content={{ ...content, contact: { ...c, address: undefined, postalCode: undefined, city: undefined } }} />
-            </div>
-          </div>
-        </div>
-        {chips.length > 0 && (
-          <ul className="m-0 mt-6 flex list-none flex-wrap gap-3 p-0">
-            {chips.map((t) => (
-              <li key={t} className="inline-flex h-11 items-center gap-2 rounded-full bg-(--pu-lime) px-5 text-[.95rem] font-medium text-ink">
-                <ServiceIcon name={t} className="size-4" />
-                {t}
-              </li>
-            ))}
-          </ul>
-        )}
-      </Wrap>
-    </section>
-  );
-}
-
 // ---------- Inner page header ----------
 
 export function PageHead({ props, tag, title, lead }: P & { tag: string; title: string; lead?: string }) {
   return (
-    <section className="border-b border-(--line) pt-16 pb-16 md:pt-24 md:pb-20">
+    <section className="pt-12 pb-16 md:pt-20 md:pb-24">
       <Wrap>
-        <div className="mb-10">
-          <Breadcrumb items={[{ label: "Inicio", href: props.link("/") }, { label: tag }]} />
-        </div>
-        <h1 className="m-0 text-[clamp(2.6rem,7vw,6rem)] leading-[.98] font-semibold tracking-[-.03em]">
-          <TwoTone text={title} />
+        <Breadcrumb items={[{ label: "Inicio", href: props.link("/") }, { label: tag }]} />
+        <h1 className="s8-display m-0 mt-8 text-[clamp(3.2rem,10vw,9.5rem)] leading-[.86] text-ink">
+          <SplitTitle text={title} />
         </h1>
-        {lead && (
-          <div className="mt-10 flex items-center gap-6">
-            <StackBars />
-            <p className="m-0 max-w-2xl text-[clamp(1.05rem,1.6vw,1.3rem)] leading-normal text-[#4a4a4a]">{lead}</p>
-          </div>
-        )}
+        <div className="mt-10 border-t border-[#cfccc5] pt-4">
+          <StatusLine props={props} />
+        </div>
+        {lead && <p className="m-0 mt-8 max-w-[34rem] text-[clamp(1.05rem,1.5vw,1.2rem)] leading-relaxed text-ink md:ml-auto">{lead}</p>}
       </Wrap>
     </section>
   );
