@@ -1,17 +1,24 @@
 import { randomBytes } from "node:crypto";
 import type { Request, Response } from "express";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   appointment,
   appointmentEvent,
   appointmentPatient,
+  appointmentSeries,
+  member,
   organization,
+  patient,
+  room,
   service,
   user,
 } from "../db/schema.js";
-import { isPhysioOverlapError } from "../lib/appointments.js";
+import { appointmentIssues, isPhysioOverlapError, PROFESSIONAL_ROLES } from "../lib/appointments.js";
+import { oneAtATime } from "../lib/clinicQueue.js";
+import { loadExceptions, loadWeeklyHours } from "../lib/clinicSchedule.js";
 import { clinicSender, sendTemplate } from "../lib/email/index.js";
+import { matchPatientByEmail } from "../lib/patientMatch.js";
 import {
   cancelDeadline,
   getOnlineBookingStatus,
@@ -21,7 +28,7 @@ import {
 } from "../lib/onlineBooking.js";
 import { bookingWindow, loadOnlineSlots } from "../lib/onlineSlots.js";
 import { isIsoDate, isTime } from "../lib/schedule.js";
-import { utcToZoned } from "../lib/timezone.js";
+import { addDaysIso, utcToZoned, zonedToUtc } from "../lib/timezone.js";
 
 // Online booking, the patient's side (no login): what the page behind a
 // clinic's link or QR needs. Anyone can call these, so: only what a patient
@@ -121,10 +128,19 @@ export const getPublicBooking = async (req: Request<Params>, res: Response) => {
       .orderBy(asc(service.name)),
     loadBookingProfessionals(clinic.id),
   ]);
+  // Group classes with sessions that can still be booked (R3)
+  const classSessions = await loadClassSessions(clinic);
+  const classes = [...new Map(classSessions.map((s) => [s.serviceId, s])).values()].map((s) => ({
+    id: s.serviceId,
+    name: s.serviceName,
+    durationMinutes: s.durationMinutes,
+    priceCents: s.priceCents,
+  }));
 
   res.json({
     clinic: { name: clinic.name, logo: clinic.logo },
     services,
+    classes,
     professionals: professionals
       .filter((p) => p.weeklyHours.length > 0)
       .map((p) => ({ id: p.memberId, name: p.name, image: p.image })),
@@ -207,23 +223,6 @@ function text(value: unknown, max: number): string | null | undefined {
 }
 
 const SLOT_TAKEN = "Esa hora ya no está libre. Elige otra, por favor.";
-
-// Runs the bookings of one clinic one after another (in this server process):
-// two patients choosing the same time can't both get the last room. They wait
-// here, without holding a database connection
-const bookingQueues = new Map<string, Promise<unknown>>();
-
-function oneAtATime<T>(clinicId: string, task: () => Promise<T>): Promise<T> {
-  const previous = bookingQueues.get(clinicId) ?? Promise.resolve();
-  const result = previous.then(task);
-  // The queue goes on whether this booking works or not
-  const tail = result.catch(() => {});
-  bookingQueues.set(clinicId, tail);
-  void tail.then(() => {
-    if (bookingQueues.get(clinicId) === tail) bookingQueues.delete(clinicId);
-  });
-  return result;
-}
 
 // POST /public/booking/:slug/appointments -> 201 { booking }
 // body: { serviceId, date, time, professionalId?, firstName, lastName, phone,
@@ -355,11 +354,20 @@ export const createPublicBooking = async (req: Request<Params>, res: Response) =
           })
           .returning({ id: appointment.id });
 
+        // Their ficha, if email and name match one (lib/patientMatch.ts).
+        // Linked: the ficha's names. Not: what they typed, and maybe a
+        // suggestion for the clinic
+        const match = await matchPatientByEmail(tx, clinic.id, { email, firstName, lastName });
         await tx.insert(appointmentPatient).values({
           appointmentId: created!.id,
           organizationId: clinic.id,
-          firstName,
-          lastName,
+          ...(match.linked
+            ? {
+                patientId: match.linked.id,
+                firstName: match.linked.firstName,
+                lastName: match.linked.lastName,
+              }
+            : { firstName, lastName, suggestedPatientId: match.suggestedId }),
         });
         // changedBy stays empty: nobody from the clinic created it
         await tx.insert(appointmentEvent).values({
@@ -462,23 +470,47 @@ async function loadPatientBooking(slug: string, token: string) {
   const clinic = await findClinic(slug);
   if (!clinic) return null;
 
-  const [row] = await db
-    .select({
-      id: appointment.id,
-      startsAt: appointment.startsAt,
-      endsAt: appointment.endsAt,
-      status: appointment.status,
-      notes: appointment.notes,
-      contactPhone: appointment.contactPhone,
-      contactEmail: appointment.contactEmail,
-      serviceName: service.name,
-      professionalName: user.name,
-    })
+  const columns = {
+    id: appointment.id,
+    startsAt: appointment.startsAt,
+    endsAt: appointment.endsAt,
+    status: appointment.status,
+    notes: appointment.notes,
+    contactPhone: appointment.contactPhone,
+    contactEmail: appointment.contactEmail,
+    serviceName: service.name,
+    professionalName: user.name,
+  };
+  // An individual appointment (its key is on the appointment)…
+  const [own] = await db
+    .select(columns)
     .from(appointment)
     .innerJoin(service, eq(appointment.serviceId, service.id))
-    .innerJoin(user, eq(appointment.physioId, user.id))
+    .leftJoin(user, eq(appointment.physioId, user.id))
     .where(and(eq(appointment.cancelToken, token), eq(appointment.organizationId, clinic.id)))
     .limit(1);
+  // …or a place in a class session (the key is on the participant)
+  const [place] = own
+    ? []
+    : await db
+        .select({
+          ...columns,
+          placeId: appointmentPatient.id,
+          placeName: sql<string>`${appointmentPatient.firstName} || ' ' || ${appointmentPatient.lastName}`,
+          placePhone: appointmentPatient.contactPhone,
+          placeEmail: appointmentPatient.contactEmail,
+        })
+        .from(appointmentPatient)
+        .innerJoin(appointment, eq(appointmentPatient.appointmentId, appointment.id))
+        .innerJoin(service, eq(appointment.serviceId, service.id))
+        .leftJoin(user, eq(appointment.physioId, user.id))
+        .where(and(eq(appointmentPatient.cancelToken, token), eq(appointmentPatient.organizationId, clinic.id)))
+        .limit(1);
+  const row = own
+    ? { ...own, placeId: null as string | null, placeName: null as string | null }
+    : place
+      ? { ...place, contactPhone: place.placePhone, contactEmail: place.placeEmail }
+      : null;
   if (!row) return null;
 
   const rules = await loadBookingRules(clinic.id);
@@ -553,6 +585,17 @@ export const cancelPublicAppointment = async (req: Request<TokenParams>, res: Re
   }
 
   await db.transaction(async (tx) => {
+    if (row.placeId) {
+      // A place in a class: they leave that session, the session stays
+      await tx.delete(appointmentPatient).where(eq(appointmentPatient.id, row.placeId));
+      await tx.insert(appointmentEvent).values({
+        appointmentId: row.id,
+        organizationId: found.clinic.id,
+        type: "patients_changed",
+        changes: { onlineCancel: { from: row.placeName, to: null } },
+      });
+      return;
+    }
     await tx
       .update(appointment)
       .set({
@@ -572,7 +615,9 @@ export const cancelPublicAppointment = async (req: Request<TokenParams>, res: Re
 
   // To the clinic, if it wants notices: the time is free again
   if (rules.notifyEmail) {
-    const patients = await db
+    const patients = row.placeName
+      ? [{ firstName: row.placeName, lastName: "" }]
+      : await db
       .select({ firstName: appointmentPatient.firstName, lastName: appointmentPatient.lastName })
       .from(appointmentPatient)
       .where(eq(appointmentPatient.appointmentId, row.id));
@@ -586,7 +631,7 @@ export const cancelPublicAppointment = async (req: Request<TokenParams>, res: Re
         phone: row.contactPhone,
         email: row.contactEmail,
         serviceName: row.serviceName,
-        professionalName: row.professionalName,
+        professionalName: row.professionalName ?? "",
         dateLabel: longDate(found.booking.date),
         startTime: found.booking.startTime,
         endTime: found.booking.endTime,
@@ -601,3 +646,301 @@ export const cancelPublicAppointment = async (req: Request<TokenParams>, res: Re
     booking: { ...found.booking, cancelled: true, canCancel: false, cancelBlocked: "ALREADY_CANCELLED" },
   });
 };
+
+// ---------- Group classes (book a place in a session) ----------
+
+type BookableClinic = NonNullable<Awaited<ReturnType<typeof bookableClinic>>>;
+
+// The class sessions that can be booked online now: sessions of the clinic's
+// classes (R3), not cancelled, inside the booking window (notice and days
+// ahead), of active group services. placesLeft: free places in the session
+async function loadClassSessions(clinic: BookableClinic, filter: { serviceId?: string; sessionId?: string } = {}) {
+  const { lastDate } = bookingWindow(clinic.timezone, clinic.rules);
+  const from = new Date(Date.now() + clinic.rules.minNoticeMinutes * 60000);
+  const until = zonedToUtc(addDaysIso(lastDate, 1), "00:00", clinic.timezone);
+  // Counts below name "appointment"."id" in full: in a query on one table
+  // Drizzle writes columns without their table, and inside the subquery a bare
+  // "id" would be the patient row's
+  const rows = await db
+    .select({
+      id: appointment.id,
+      startsAt: appointment.startsAt,
+      endsAt: appointment.endsAt,
+      roomId: appointment.roomId,
+      physioId: appointment.physioId,
+      serviceId: service.id,
+      serviceName: service.name,
+      durationMinutes: service.durationMinutes,
+      priceCents: service.priceCents,
+      maxPatients: service.maxPatients,
+      serviceRoomTypeId: service.roomTypeId,
+      roomCapacity: room.capacity,
+      roomIsActive: room.isActive,
+      roomTypeId: room.roomTypeId,
+      professionalName: user.name,
+      taken: sql<number>`(select count(*)::int from appointment_patient ap where ap.appointment_id = "appointment"."id")`,
+    })
+    .from(appointment)
+    .innerJoin(appointmentSeries, eq(appointment.seriesId, appointmentSeries.id))
+    .innerJoin(service, eq(appointment.serviceId, service.id))
+    .innerJoin(room, eq(appointment.roomId, room.id))
+    .leftJoin(user, eq(appointment.physioId, user.id))
+    .where(
+      and(
+        eq(appointment.organizationId, clinic.id),
+        eq(appointmentSeries.kind, "class"),
+        inArray(appointment.status, ["booked", "confirmed"]),
+        eq(service.isActive, true),
+        eq(service.isGroup, true),
+        gte(appointment.startsAt, from),
+        lt(appointment.startsAt, until),
+        filter.serviceId ? eq(service.id, filter.serviceId) : undefined,
+        filter.sessionId ? eq(appointment.id, filter.sessionId) : undefined,
+      ),
+    )
+    .orderBy(asc(appointment.startsAt));
+  if (rows.length === 0) return [];
+
+  // The same checks as the calendar's warnings: a session that no longer fits
+  // the clinic (closed that day, outside hours, room deactivated or of another
+  // type) isn't offered, and its places count everyone in the room at the time
+  // (other appointments there too)
+  const dates = rows.map((r) => utcToZoned(r.startsAt, clinic.timezone).date).sort();
+  const [weeklyHours, exceptions, team, others] = await Promise.all([
+    loadWeeklyHours(clinic.id),
+    loadExceptions(clinic.id, { from: dates[0], to: dates.at(-1) }),
+    db
+      .select({ userId: member.userId })
+      .from(member)
+      .where(and(eq(member.organizationId, clinic.id), inArray(member.role, PROFESSIONAL_ROLES))),
+    db
+      .select({
+        id: appointment.id,
+        roomId: appointment.roomId,
+        startsAt: appointment.startsAt,
+        endsAt: appointment.endsAt,
+        patientCount: sql<number>`(select count(*)::int from appointment_patient ap where ap.appointment_id = "appointment"."id")`,
+      })
+      .from(appointment)
+      .where(
+        and(
+          eq(appointment.organizationId, clinic.id),
+          inArray(appointment.roomId, [...new Set(rows.map((r) => r.roomId))]),
+          sql`${appointment.status} <> 'cancelled'`,
+          lt(appointment.startsAt, rows.at(-1)!.endsAt),
+          gte(appointment.endsAt, rows[0]!.startsAt),
+        ),
+      ),
+  ]);
+  const professionalIds = new Set(team.map((t) => t.userId));
+  const BLOCKING = new Set(["CLINIC_CLOSED", "OUTSIDE_HOURS", "ROOM_INACTIVE", "SERVICE_INACTIVE", "WRONG_ROOM_TYPE"]);
+
+  return rows.flatMap((r) => {
+    const start = utcToZoned(r.startsAt, clinic.timezone);
+    const issues = appointmentIssues(
+      {
+        date: start.date,
+        startTime: start.time,
+        durationMinutes: Math.round((r.endsAt.getTime() - r.startsAt.getTime()) / 60000),
+        startsAt: r.startsAt,
+        endsAt: r.endsAt,
+        patientCount: r.taken,
+        roomId: r.roomId,
+        roomIsActive: r.roomIsActive,
+        roomCapacity: r.roomCapacity,
+        roomTypeId: r.roomTypeId,
+        serviceIsActive: true,
+        serviceRoomTypeId: r.serviceRoomTypeId,
+        serviceMaxPatients: r.maxPatients,
+        physioId: r.physioId,
+      },
+      { weeklyHours, exceptions, professionalIds, others: [] },
+    );
+    if (issues.some((i) => BLOCKING.has(i.code))) return [];
+    const inRoom = others
+      .filter((o) => o.id !== r.id && o.roomId === r.roomId && o.startsAt < r.endsAt && o.endsAt > r.startsAt)
+      .reduce((sum, o) => sum + o.patientCount, 0);
+    return [
+      {
+        ...r,
+        // Someone no longer in the team isn't named
+        professionalName: r.physioId && professionalIds.has(r.physioId) ? r.professionalName : null,
+        placesLeft: Math.max(0, Math.min(r.maxPatients - r.taken, r.roomCapacity - r.taken - inRoom)),
+      },
+    ];
+  });
+}
+
+// GET /public/booking/:slug/classes?serviceId= -> { sessions }
+// The upcoming sessions of a class, with the places left (0 = full)
+export const getPublicClassSessions = async (req: Request<Params>, res: Response) => {
+  const clinic = await bookableClinic(req, res);
+  if (!clinic) return;
+  const { serviceId } = req.query;
+  if (typeof serviceId !== "string" || !UUID_PATTERN.test(serviceId)) {
+    return send(res, 400, "INVALID_SERVICE", "Elige una clase");
+  }
+  const sessions = await loadClassSessions(clinic, { serviceId });
+  res.json({
+    sessions: sessions.map((s) => {
+      const start = utcToZoned(s.startsAt, clinic.timezone);
+      return {
+        id: s.id,
+        date: start.date,
+        startTime: start.time,
+        endTime: utcToZoned(s.endsAt, clinic.timezone).time,
+        professionalName: s.professionalName,
+        placesLeft: s.placesLeft,
+      };
+    }),
+  });
+};
+
+// POST /public/booking/:slug/classes/:sessionId -> 201 { booking }
+// body: { firstName, lastName, phone, email, consent: true, website? }
+// Books one place in a class session. Linked to the patient's ficha when email
+// and name match one (lib/patientMatch.ts); the answer never says so
+export const bookPublicClass = async (req: Request<Params & { sessionId: string }>, res: Response) => {
+  const clinic = await bookableClinic(req, res);
+  if (!clinic) return;
+  const body = req.body ?? {};
+  if (typeof body.website === "string" && body.website.trim() !== "") {
+    res.status(201).json({ booking: null });
+    return;
+  }
+  if (!UUID_PATTERN.test(req.params.sessionId)) return send(res, 409, "CLASS_UNAVAILABLE", CLASS_UNAVAILABLE);
+  const firstName = text(body.firstName, 100);
+  const lastName = text(body.lastName, 100);
+  const phone = text(body.phone, 30);
+  const email = text(body.email, 200)?.toLowerCase();
+  if (!firstName || !lastName) return send(res, 400, "INVALID_NAME", "Escribe tu nombre y tus apellidos");
+  if (!phone || !PHONE_PATTERN.test(phone)) return send(res, 400, "INVALID_PHONE", "El teléfono no es válido");
+  if (!email || !EMAIL_PATTERN.test(email)) return send(res, 400, "INVALID_EMAIL", "El email no es válido");
+  if (body.consent !== true) {
+    return send(res, 400, "CONSENT_REQUIRED", "Tienes que aceptar el tratamiento de tus datos");
+  }
+  if (tooMany(req.ip ?? "unknown")) {
+    return send(res, 429, "TOO_MANY_REQUESTS", "Has hecho varias reservas seguidas. Inténtalo dentro de un rato o llama a la clínica.");
+  }
+
+  const result = await oneAtATime(clinic.id, async () => {
+    // Checked again now, one booking at a time: still bookable, with a place
+    const [session] = await loadClassSessions(clinic, { sessionId: req.params.sessionId });
+    if (!session) return { error: "CLASS_UNAVAILABLE" as const };
+    if (session.placesLeft < 1) return { error: "CLASS_FULL" as const };
+
+    return db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${clinic.id}))`);
+      // The same person twice in a session (by the email they booked with, or
+      // their ficha's): once is enough
+      const already = await tx
+        .select({ id: appointmentPatient.id })
+        .from(appointmentPatient)
+        .leftJoin(patient, eq(appointmentPatient.patientId, patient.id))
+        .where(
+          and(
+            eq(appointmentPatient.appointmentId, session.id),
+            sql`(lower(${appointmentPatient.contactEmail}) = ${email} or lower(trim(${patient.email})) = ${email})`,
+            sql`lower(coalesce(${patient.firstName}, ${appointmentPatient.firstName})) = ${firstName.toLowerCase()}`,
+          ),
+        )
+        .limit(1);
+      if (already.length) return { error: "ALREADY_BOOKED" as const };
+      const [{ taken }] = (
+        await tx.execute<{ taken: number }>(
+          sql`select count(*)::int as taken from appointment_patient where appointment_id = ${session.id}`,
+        )
+      ).rows as [{ taken: number }];
+      if (taken >= Math.min(session.maxPatients, session.roomCapacity)) return { error: "CLASS_FULL" as const };
+
+      const match = await matchPatientByEmail(tx, clinic.id, { email, firstName, lastName });
+      const cancelToken = randomBytes(24).toString("base64url");
+      await tx.insert(appointmentPatient).values({
+        appointmentId: session.id,
+        organizationId: clinic.id,
+        ...(match.linked
+          ? { patientId: match.linked.id, firstName: match.linked.firstName, lastName: match.linked.lastName }
+          : { firstName, lastName, contactEmail: email, suggestedPatientId: match.suggestedId }),
+        contactPhone: phone,
+        cancelToken,
+      });
+      await tx.insert(appointmentEvent).values({
+        appointmentId: session.id,
+        organizationId: clinic.id,
+        type: "patients_changed",
+        changes: { onlineBooking: { from: null, to: `${firstName} ${lastName}` } },
+      });
+      return { session, cancelToken };
+    });
+  });
+
+  if ("error" in result) {
+    const messages = {
+      CLASS_UNAVAILABLE: CLASS_UNAVAILABLE,
+      CLASS_FULL: "Esta sesión se acaba de completar. Elige otra.",
+      ALREADY_BOOKED: "Ya tienes plaza en esta sesión. Revisa tu email.",
+    };
+    const code = result.error as keyof typeof messages;
+    return send(res, 409, code, messages[code]);
+  }
+
+  const { session, cancelToken } = result as Exclude<typeof result, { error: string }>;
+  const start = utcToZoned(session.startsAt, clinic.timezone);
+  const endTime = utcToZoned(session.endsAt, clinic.timezone).time;
+  const { rules } = clinic;
+  void sendTemplate(
+    "bookingConfirmation",
+    email,
+    {
+      firstName,
+      clinicName: clinic.name,
+      serviceName: session.serviceName,
+      professionalName: session.professionalName,
+      dateLabel: longDate(start.date),
+      startTime: start.time,
+      endTime,
+      url: `${frontendUrl}/reservar/${encodeURIComponent(req.params.slug)}/cita/${cancelToken}`,
+      cancelNote: !rules.cancelEnabled
+        ? null
+        : rules.cancelNoticeHours === 0
+          ? "Si no puedes venir, puedes cancelar tu plaza desde el enlace hasta su hora de inicio."
+          : `Si no puedes venir, puedes cancelar tu plaza desde el enlace hasta ${hoursLabel(rules.cancelNoticeHours)} antes.`,
+      policyText: rules.policyText,
+    },
+    { name: clinic.name, replyTo: rules.notifyEmail ?? undefined },
+  );
+  if (rules.notifyEmail) {
+    void sendTemplate(
+      "bookingNotice",
+      rules.notifyEmail,
+      {
+        kind: "booked",
+        clinicName: clinic.name,
+        patientName: `${firstName} ${lastName}`,
+        phone,
+        email,
+        serviceName: session.serviceName,
+        professionalName: session.professionalName,
+        dateLabel: longDate(start.date),
+        startTime: start.time,
+        endTime,
+        hasNotes: false,
+        url: `${frontendUrl}/admin/bookings`,
+      },
+      { name: `${clinic.name} · Reservas`, replyTo: email },
+    );
+  }
+  res.status(201).json({
+    booking: {
+      token: cancelToken,
+      clinicName: clinic.name,
+      serviceName: session.serviceName,
+      professionalName: session.professionalName,
+      date: start.date,
+      startTime: start.time,
+      endTime,
+    },
+  });
+};
+
+const CLASS_UNAVAILABLE = "Esta sesión ya no se puede reservar online. Elige otra o llama a la clínica.";

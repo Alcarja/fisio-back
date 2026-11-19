@@ -193,7 +193,7 @@ export async function sendDueReminders(now = new Date()) {
       ),
     )
     .innerJoin(service, eq(appointment.serviceId, service.id))
-    .innerJoin(user, eq(appointment.physioId, user.id))
+    .leftJoin(user, eq(appointment.physioId, user.id))
     .innerJoin(appointmentPatient, eq(appointmentPatient.appointmentId, appointment.id))
     .leftJoin(patient, eq(appointmentPatient.patientId, patient.id))
     .where(

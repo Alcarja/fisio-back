@@ -32,3 +32,9 @@ export * from "./contact-schema.js";
 
 // Web de cada clínica: contenido, dominios, fotos y perfiles públicos (WEBS.md)
 export * from "./site-schema.js";
+
+// Cobros y bonos de los pacientes de cada clínica (COBROS.md)
+export * from "./charges-schema.js";
+
+// Bonos de sesiones y mensuales (COBROS.md), parte de Cobros y bonos
+export * from "./bono-schema.js";

@@ -100,7 +100,7 @@ async function loadAppointments(clinicId: string, patientId?: string) {
       .from(appointmentPatient)
       .innerJoin(appointment, eq(appointmentPatient.appointmentId, appointment.id))
       .innerJoin(service, eq(appointment.serviceId, service.id))
-      .innerJoin(user, eq(appointment.physioId, user.id))
+      .leftJoin(user, eq(appointment.physioId, user.id))
       .where(
         and(
           eq(appointmentPatient.organizationId, clinicId),

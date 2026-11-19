@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { and, asc, eq, ne } from "drizzle-orm";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { appointment, roomType, service } from "../db/schema.js";
 
@@ -240,6 +240,27 @@ export const updateService = async (req: Request<{ serviceId: string }>, res: Re
   }
   if (data.name && (await nameTaken(clinicId, data.name, serviceId))) {
     return conflict(res, "SERVICE_NAME_TAKEN", "Ya hay un servicio con ese nombre");
+  }
+
+  // A group service with classes or group sessions still to come can't become
+  // individual: those sessions (and their online places) would be left with
+  // more patients than it allows. Cancel or move them first
+  if (current.isGroup && data.isGroup === false) {
+    const found = await db.execute<{ n: number }>(sql`
+      select count(*)::int as n from appointment a
+      left join appointment_series s on s.id = a.series_id
+      where a.organization_id = ${clinicId} and a.service_id = ${serviceId}
+        and a.status <> 'cancelled' and a.starts_at > now()
+        and (s.kind = 'class'
+             or (select count(*) from appointment_patient ap where ap.appointment_id = a.id) > 1)`);
+    const n = found.rows[0]?.n ?? 0;
+    if (n > 0) {
+      return conflict(
+        res,
+        "HAS_GROUP_SESSIONS",
+        `Tiene ${n} ${n === 1 ? "sesión de grupo o clase próxima" : "sesiones de grupo o clases próximas"}: cancélalas o muévelas antes de hacerlo individual`,
+      );
+    }
   }
 
   await db.update(service).set(data).where(eq(service.id, serviceId));

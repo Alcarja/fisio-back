@@ -85,7 +85,8 @@ export const getMonthlyReport = async (req: Request, res: Response) => {
     .groupBy(appointment.physioId, appointment.serviceId);
 
   const cellServiceIds = [...new Set(cells.map((c) => c.serviceId))];
-  const cellPhysioIds = [...new Set(cells.map((c) => c.physioId))];
+  // Class sessions without a physio yet have no physio: they're left out here
+  const cellPhysioIds = [...new Set(cells.flatMap((c) => (c.physioId ? [c.physioId] : [])))];
 
   const [services, professionals] = await Promise.all([
     db
@@ -123,5 +124,6 @@ export const getMonthlyReport = async (req: Request, res: Response) => {
     professionals.push(...former);
   }
 
-  res.json({ month, timezone: timeZone, services, professionals, cells });
+  // Class sessions without a physio yet don't belong to anyone's column
+  res.json({ month, timezone: timeZone, services, professionals, cells: cells.filter((c) => c.physioId) });
 };

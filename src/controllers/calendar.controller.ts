@@ -54,6 +54,8 @@ export const getCalendarConfig = async (req: Request, res: Response) => {
         isGroup: service.isGroup,
         maxPatients: service.maxPatients,
         color: service.color,
+        // Starting price of a session recorded in Cobros
+        priceCents: service.priceCents,
       })
       .from(service)
       .where(and(eq(service.organizationId, clinicId), eq(service.isActive, true)))

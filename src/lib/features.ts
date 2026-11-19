@@ -9,6 +9,8 @@ import { clinicFeature } from "../db/schema.js";
 // To add one: add its key here and in the frontend, then protect its routes
 // with requireFeature("key") after requireActiveClinic.
 export const CLINIC_FEATURES = [
+  // Cobros y bonos (COBROS.md): the clinic records what its patients pay,
+  // sessions and bonos. Not invoices (no Verifactu): the key keeps its old name
   "invoicing",
   // The whole Pacientes section: fichas, and in them the historia clínica
   // (antecedentes, expedientes, evolution notes). Health data, so off until the

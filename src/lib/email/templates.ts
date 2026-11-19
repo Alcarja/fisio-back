@@ -176,10 +176,11 @@ function contactRequest(data: ContactRequestData): RenderedEmail {
 // ---------- Online booking confirmed (to the patient) ----------
 
 export type BookingConfirmationData = {
+  // null: a class without a physio yet
   firstName: string;
   clinicName: string;
   serviceName: string;
-  professionalName: string;
+  professionalName: string | null;
   // Already written for people: "miércoles, 18 de noviembre", "10:00"
   dateLabel: string;
   startTime: string;
@@ -199,7 +200,7 @@ function bookingConfirmation(data: BookingConfirmationData): RenderedEmail {
     ["Día", data.dateLabel],
     ["Hora", `${data.startTime}–${data.endTime}`],
     ["Servicio", data.serviceName],
-    ["Con", data.professionalName],
+    ...(data.professionalName ? ([["Con", data.professionalName]] as [string, string][]) : []),
   ];
   const cancel =
     data.cancelNote ?? "Si no puedes venir, avisa a la clínica lo antes posible.";
@@ -239,7 +240,7 @@ export type BookingNoticeData = {
   phone: string | null;
   email: string | null;
   serviceName: string;
-  professionalName: string;
+  professionalName: string | null;
   dateLabel: string;
   startTime: string;
   endTime: string;
@@ -264,7 +265,7 @@ function bookingNotice(data: BookingNoticeData): RenderedEmail {
     ["Día", data.dateLabel],
     ["Hora", `${data.startTime}–${data.endTime}`],
     ["Servicio", data.serviceName],
-    ["Con", data.professionalName],
+    ...(data.professionalName ? ([["Con", data.professionalName]] as [string, string][]) : []),
     ["Paciente", data.patientName],
     ["Teléfono", data.phone],
     ["Email", data.email],
@@ -275,7 +276,7 @@ function bookingNotice(data: BookingNoticeData): RenderedEmail {
   return {
     subject,
     html: renderLayout({
-      preheader: `${when}. ${data.serviceName} con ${data.professionalName}.`,
+      preheader: `${when}. ${data.serviceName}${data.professionalName ? ` con ${data.professionalName}` : ""}.`,
       heading: booked ? "Nueva reserva online" : "Reserva online cancelada",
       paragraphs: [e(intro), filled.map(([k, v]) => `<strong>${k}:</strong> ${e(v)}`).join("<br>")],
       button,
@@ -293,7 +294,8 @@ export type AppointmentReminderData = {
   dateLabel: string;
   startTime: string;
   endTime: string;
-  professionalName: string;
+  // null: a class without a physio yet
+  professionalName: string | null;
   // null: the clinic prefers not to say it (it can reveal health details)
   serviceName: string | null;
   // The clinic's own text: address, what to bring…
@@ -310,7 +312,7 @@ function appointmentReminder(data: AppointmentReminderData): RenderedEmail {
     ["Día", data.dateLabel],
     ["Hora", `${data.startTime}–${data.endTime}`],
     ...(data.serviceName ? ([["Servicio", data.serviceName]] as [string, string][]) : []),
-    ["Con", data.professionalName],
+    ...(data.professionalName ? ([["Con", data.professionalName]] as [string, string][]) : []),
   ];
   const cancel = data.url
     ? "Si no puedes venir, cancela la cita desde el enlace para que otra persona pueda usar la hora."
@@ -319,7 +321,7 @@ function appointmentReminder(data: AppointmentReminderData): RenderedEmail {
   return {
     subject,
     html: renderLayout({
-      preheader: `${data.dateLabel}, ${data.startTime}, con ${data.professionalName}.`,
+      preheader: `${data.dateLabel}, ${data.startTime}${data.professionalName ? `, con ${data.professionalName}` : ""}.`,
       heading: `Te esperamos, ${data.firstName}`,
       paragraphs: [
         `Te recordamos tu cita en <strong>${e(data.clinicName)}</strong>.`,

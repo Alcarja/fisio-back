@@ -69,30 +69,37 @@ export async function clinicOpeningOn(clinicId: string, date: string) {
 // Service, room and physio of the clinic, checked and loaded
 export async function loadParts(
   clinicId: string,
-  ids: { serviceId: string; roomId: string; physioId: string },
+  ids: { serviceId: string; roomId: string; physioId: string | null },
 ) {
+  // Not an id at all (a typo, an old link): it doesn't exist, rather than a
+  // database error
+  const isId = (v: unknown) =>
+    typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+  const none = Promise.resolve([] as never[]);
   const [[svc], [rm], [professional]] = await Promise.all([
-    db
+    !isId(ids.serviceId) ? none : db
       .select()
       .from(service)
       .where(and(eq(service.id, ids.serviceId), eq(service.organizationId, clinicId)))
       .limit(1),
-    db
+    !isId(ids.roomId) ? none : db
       .select()
       .from(room)
       .where(and(eq(room.id, ids.roomId), eq(room.organizationId, clinicId)))
       .limit(1),
-    db
-      .select({ role: member.role })
-      .from(member)
-      .where(
-        and(
-          eq(member.organizationId, clinicId),
-          eq(member.userId, ids.physioId),
-          inArray(member.role, PROFESSIONAL_ROLES),
-        ),
-      )
-      .limit(1),
+    ids.physioId
+      ? db
+          .select({ role: member.role })
+          .from(member)
+          .where(
+            and(
+              eq(member.organizationId, clinicId),
+              eq(member.userId, ids.physioId),
+              inArray(member.role, PROFESSIONAL_ROLES),
+            ),
+          )
+          .limit(1)
+      : Promise.resolve([]),
   ]);
   return { svc, rm, professional };
 }
@@ -101,13 +108,17 @@ type CheckInput = {
   clinicId: string;
   serviceId: string;
   roomId: string;
-  physioId: string;
+  // null: a class session without a physio yet (only group services, and only
+  // when the caller allows it)
+  physioId: string | null;
   date: string; // clinic local date
   startTime: string; // clinic local "HH:MM"
   startsAt: Date; // the same moment, in UTC
   patientCount: number;
   // When editing: the appointment itself doesn't count as a conflict
   excludeAppointmentId?: string;
+  // Class sessions (R3): may have no physio yet
+  classSession?: boolean;
 };
 
 // null if everything is fine, or the first rule that fails
@@ -119,7 +130,11 @@ export async function checkAppointmentRules(input: CheckInput): Promise<RuleErro
   if (!svc.isActive) return fail(400, "SERVICE_INACTIVE", "Ese servicio está desactivado");
   if (!rm) return fail(400, "INVALID_ROOM", "Esa sala no existe en tu clínica");
   if (!rm.isActive) return fail(400, "ROOM_INACTIVE", "Esa sala está desactivada");
-  if (!professional) {
+  if (input.physioId === null) {
+    if (!input.classSession || !svc.isGroup) {
+      return fail(400, "PHYSIO_REQUIRED", "Elige el fisio que atenderá la cita");
+    }
+  } else if (!professional) {
     return fail(400, "INVALID_PHYSIO", "Ese profesional no puede atender citas en tu clínica");
   }
 
@@ -130,7 +145,11 @@ export async function checkAppointmentRules(input: CheckInput): Promise<RuleErro
 
   // 3. Patients: at least one, at most what the service and the room allow
   const maxPatients = Math.min(svc.maxPatients, rm.capacity);
-  if (input.patientCount < 1) return fail(400, "NO_PATIENTS", "Añade al menos un paciente");
+  // Group sessions may start empty (people join or book later); individual
+  // appointments need their patient
+  if (input.patientCount < 1 && !svc.isGroup) {
+    return fail(400, "NO_PATIENTS", "Añade al menos un paciente");
+  }
   if (input.patientCount > maxPatients) {
     return fail(
       400,
@@ -232,6 +251,7 @@ export async function checkAppointmentRules(input: CheckInput): Promise<RuleErro
 
   // 7. The physio has no other appointment at that time, in any clinic
   //    (the database also guarantees it: appointment_physio_no_overlap)
+  if (input.physioId === null) return null;
   const [physioBusy] = await db
     .select({ id: appointment.id })
     .from(appointment)
@@ -276,7 +296,7 @@ export type IssueInput = {
   serviceIsActive: boolean;
   serviceRoomTypeId: string | null;
   serviceMaxPatients: number;
-  physioId: string;
+  physioId: string | null;
 };
 
 // Why an appointment no longer fits after the clinic changed something
@@ -334,7 +354,9 @@ export function appointmentIssues(
     });
   }
 
-  if (!context.professionalIds.has(a.physioId)) {
+  if (a.physioId === null) {
+    issues.push({ code: "NO_PHYSIO", message: "Todavía no tiene fisio asignado" });
+  } else if (!context.professionalIds.has(a.physioId)) {
     issues.push({ code: "PHYSIO_NOT_IN_TEAM", message: "El fisio ya no forma parte del equipo" });
   }
 

@@ -1,9 +1,11 @@
 import { Router } from "express";
 import {
+  bookPublicClass,
   cancelPublicAppointment,
   createPublicBooking,
   getPublicAppointment,
   getPublicBooking,
+  getPublicClassSessions,
   getPublicSlots,
 } from "../controllers/publicBooking.controller.js";
 
@@ -19,6 +21,9 @@ router.get("/:slug", getPublicBooking);
 // Free slots for a service in a range of dates
 router.get("/:slug/slots", getPublicSlots);
 router.post("/:slug/appointments", createPublicBooking);
+// Group classes: their upcoming sessions with places, and booking one place
+router.get("/:slug/classes", getPublicClassSessions);
+router.post("/:slug/classes/:sessionId", bookPublicClass);
 
 // The patient's own appointment, by the key in the link they got when booking.
 // These also work when online booking is switched off
