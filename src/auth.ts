@@ -152,6 +152,20 @@ export const auth = betterAuth({
     },
   },
 
+  // The visitor's IP for the limits above. The API only listens on 127.0.0.1,
+  // behind the proxy (Caddy) on the same machine, which sends it in
+  // X-Forwarded-For. When that header has several addresses ("what the
+  // visitor claimed, their real IP"), the last one not added by our proxy is
+  // the real one. Without trustedProxies Better Auth ignores such a header and
+  // puts everyone in a single bucket: five wrong passwords from one person
+  // would lock everybody out of logging in
+  advanced: {
+    ipAddress: {
+      ipAddressHeaders: ["x-forwarded-for"],
+      trustedProxies: ["127.0.0.1", "::1"],
+    },
+  },
+
   hooks: {
     before: createAuthMiddleware(async (ctx) => {
       if (ctx.path === "/sign-up/email") {

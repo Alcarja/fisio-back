@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { and, asc, eq, inArray, lt, ne, notInArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, ne, notInArray, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   clinicLegal,
@@ -584,6 +584,9 @@ export const updateSiteTeamMember = async (req: Request<{ memberId: string }>, r
 
 // ---------- Own domain ----------
 
+// A domain another clinic added but never connected can be claimed after this
+const UNCLAIMED_DOMAIN_MS = 72 * 60 * 60 * 1000;
+
 const domainsOff = (res: Response) =>
   send(res, 503, "DOMAINS_UNAVAILABLE", "Los dominios propios aún no están disponibles");
 
@@ -608,6 +611,23 @@ export const addDomain = async (req: Request, res: Response) => {
 
   const taken = () =>
     send(res, 409, "DOMAIN_TAKEN", "Este dominio ya está conectado a otra clínica. Escríbenos si es tuyo.");
+
+  // Another clinic added it but never connected it: after a few days it can't
+  // keep it from its real owner (only whoever controls the DNS can verify it)
+  const others = await db
+    .select({ organizationId: clinicSiteDomain.organizationId, verifiedAt: clinicSiteDomain.verifiedAt, createdAt: clinicSiteDomain.createdAt })
+    .from(clinicSiteDomain)
+    .where(inArray(clinicSiteDomain.hostname, [apex, www]));
+  if (others.length) {
+    const abandoned = others.every((o) => !o.verifiedAt && o.createdAt.getTime() < Date.now() - UNCLAIMED_DOMAIN_MS);
+    if (!abandoned) return taken();
+    const owners = [...new Set(others.map((o) => o.organizationId))];
+    await db
+      .delete(clinicSiteDomain)
+      .where(and(inArray(clinicSiteDomain.organizationId, owners), isNull(clinicSiteDomain.verifiedAt)));
+    console.log(`[site] unclaimed domain ${apex} released from clinic=${owners.join(",")} for clinic=${clinicId}`);
+  }
+
   const token = newVerifyToken();
   try {
     await db.insert(clinicSiteDomain).values([
