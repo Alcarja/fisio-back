@@ -17,6 +17,7 @@
     "db:backfill-patients": "tsx src/db/backfill-patients.ts",
     "db:encrypt-clinical": "tsx src/db/encrypt-clinical.ts",
     "db:seed-exercises": "tsx src/db/seed-exercises.ts",
+    "db:seed-plans": "tsx src/db/seed-plans.ts",
     "email:test": "tsx src/scripts/send-test-email.ts",
     "check:sites": "sh scripts/check-sites.sh",
     "sites:dev": "npm run sites:css && (npm run sites:css -- --watch=always & tsx watch --env-file=.env.sites src/sites/index.ts)",

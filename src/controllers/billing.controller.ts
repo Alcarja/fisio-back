@@ -3,6 +3,8 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { clinicBilling, clinicPayment, organization, user } from "../db/schema.js";
 import { utcToZoned } from "../lib/timezone.js";
+import { loadContracts, loadProfessionalLog, pricerFor, professionalsAt } from "../lib/plans.js";
+import { contractsFor } from "./plans.controller.js";
 
 // Pagos (super-admin only, checked in billing.routes.ts). Manual tracking of
 // whether each clinic has paid each month. Months are "YYYY-MM" in Spain's
@@ -33,6 +35,7 @@ const send = (res: Response, status: number, code: string, message: string) =>
 // - exempt: "no tiene que pagar"
 // - payment: when that month was marked as paid, and by whom (null = not paid)
 // - paidMonths: the paid months among the last 12 (for the history strip)
+// - contract: its plan, cycle and price (null fields without a plan)
 export const getBilling = async (req: Request, res: Response) => {
   const currentMonth = monthOf(new Date());
   const { month: requested } = req.query;
@@ -64,11 +67,45 @@ export const getBilling = async (req: Request, res: Response) => {
         month: clinicPayment.month,
         paidAt: clinicPayment.paidAt,
         recordedByName: user.name,
+        amountCents: clinicPayment.amountCents,
       })
       .from(clinicPayment)
       .leftJoin(user, eq(clinicPayment.recordedBy, user.id))
       .where(inArray(clinicPayment.month, window)),
   ]);
+
+  const ids = clinics.map((c) => c.id);
+  const [contracts, full, logs] = await Promise.all([contractsFor(ids), loadContracts(ids), loadProfessionalLog(ids)]);
+  const nextMonth = shiftMonth(currentMonth, 1);
+
+  // Each month of the history: what was charged (saved when it was marked
+  // paid) or what it should be (the contract with the professionals the
+  // clinic had on the 1st). null = no plan. And, if the clinic's professionals
+  // changed this month, what it pays from next month
+  const monthAmounts = (clinicId: string) => {
+    const c = full.get(clinicId)!;
+    const pricer = pricerFor(clinicId);
+    const log = logs.get(clinicId);
+    const own = payments.filter((p) => p.organizationId === clinicId);
+    const amounts: Record<string, number | null> = {};
+    const professionals: Record<string, number> = {};
+    for (const m of window) {
+      const n = c.professionalsOverride ?? professionalsAt(log, m, c.professionalsCounted);
+      professionals[m] = n;
+      const saved = own.find((p) => p.month === m)?.amountCents;
+      amounts[m] = saved ?? (c.plan && pricer ? pricer(n).monthlyCents : null);
+    }
+    const thisMonth = c.plan && pricer ? pricer(professionalsAt(log, currentMonth, c.professionalsCounted)).monthlyCents : null;
+    const fromNext = c.plan && pricer ? pricer(c.professionalsCounted).monthlyCents : null;
+    return {
+      amounts,
+      professionals,
+      upcoming:
+        !c.exempt && thisMonth !== null && fromNext !== null && thisMonth !== fromNext && c.professionalsOverride === null
+          ? { month: nextMonth, monthlyCents: fromNext, professionals: c.professionalsCounted }
+          : null,
+    };
+  };
 
   res.json({
     month,
@@ -84,6 +121,9 @@ export const getBilling = async (req: Request, res: Response) => {
           ? { paidAt: payment.paidAt, recordedByName: payment.recordedByName }
           : null,
         paidMonths: own.map((p) => p.month).sort(),
+        // Plan and price (src/lib/plans.ts): what it should pay
+        contract: contracts.get(clinic.id) ?? null,
+        ...monthAmounts(clinic.id),
       };
     }),
   });
@@ -125,12 +165,21 @@ async function checkPaymentMonth(req: Request<PaymentParams>, res: Response) {
 // PUT /admin/billing/:clinicId/payments/:month -> 204 (marking twice changes nothing)
 export const markPaid = async (req: Request<PaymentParams>, res: Response) => {
   if (!(await checkPaymentMonth(req, res))) return;
+  // What this month costs, saved with the payment (prices or plans changed
+  // later don't rewrite it): the contract with the professionals of the 1st
+  const { clinicId, month } = req.params;
+  const contract = (await loadContracts([clinicId])).get(clinicId)!;
+  const pricer = pricerFor(clinicId);
+  const professionals = contract.professionalsOverride ?? professionalsAt((await loadProfessionalLog([clinicId])).get(clinicId), month, contract.professionalsCounted);
   await db
     .insert(clinicPayment)
     .values({
-      organizationId: req.params.clinicId,
-      month: req.params.month,
+      organizationId: clinicId,
+      month,
       recordedBy: req.user!.id,
+      amountCents: contract.plan && pricer ? pricer(professionals).monthlyCents : null,
+      planName: contract.plan?.name ?? null,
+      professionals: contract.plan ? professionals : null,
     })
     .onConflictDoNothing();
   res.status(204).end();

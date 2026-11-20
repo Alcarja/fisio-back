@@ -12,6 +12,9 @@ export * from "./appointment-schema.js";
 // Pagos de las clínicas (super-admin)
 export * from "./billing-schema.js";
 
+// Planes de Kineflow, precios y extras de cada clínica (super-admin)
+export * from "./plan-schema.js";
+
 // Funcionalidades opcionales por clínica (super-admin)
 export * from "./feature-schema.js";
 

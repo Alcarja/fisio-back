@@ -1,8 +1,8 @@
 import type { Request, Response } from "express";
-import { and, asc, eq, inArray, ne } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { generateId } from "better-auth";
 import { db } from "../db/index.js";
-import { clinicFeature, invitation, member, organization, user } from "../db/schema.js";
+import { clinicFeature, clinicProfessionalLog, invitation, member, organization, user } from "../db/schema.js";
 import {
   getClinicMembers,
   getPendingInvitations,
@@ -620,6 +620,13 @@ export const updateMemberRoles = async (
       for (const { memberId, role } of changes as { memberId: string; role: string }[]) {
         await tx.update(member).set({ role }).where(eq(member.id, memberId));
       }
+      // The super-admin made these changes: no need to warn them about them.
+      // The rows the trigger logged in this transaction are the ones whose
+      // xmin is this transaction (src/db/sql/professional-log.sql)
+      await tx
+        .update(clinicProfessionalLog)
+        .set({ reviewedAt: new Date(), reviewedBy: req.user!.id })
+        .where(and(eq(clinicProfessionalLog.organizationId, clinicId), sql`${clinicProfessionalLog}.xmin = pg_current_xact_id()::xid`));
     });
 
     res.json({ members: await getClinicMembers(clinicId) });

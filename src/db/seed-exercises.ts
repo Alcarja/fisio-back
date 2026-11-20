@@ -48,7 +48,10 @@ async function main() {
 
 main()
   .catch((error) => {
-    console.error("Loading the exercises failed:", (error as Error).message?.split("\n")[0]);
+    // Drizzle's message is the query; the database's reason is in `cause`
+    // (e.g. a column that isn't there yet: run `npm run db:push` first)
+    const cause = (error as { cause?: { message?: string } }).cause?.message;
+    console.error("Loading the exercises failed:", cause ?? (error as Error).message?.split("\n")[0]);
     process.exitCode = 1;
   })
   .finally(() => pool.end());
