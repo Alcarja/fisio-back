@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { alias } from "drizzle-orm/pg-core";
-import { and, asc, eq, gte, inArray, lt, ne, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   appointment,
@@ -45,12 +45,12 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 // Who can change any appointment of the clinic. Everyone else (physios) can see
 // them all but only change their own (where they are the physio)
 const MANAGE_ALL_ROLES = ["owner", "admin", "receptionist"];
-const canManageAll = (req: Request) => MANAGE_ALL_ROLES.includes(req.clinicRole!);
+export const canManageAll = (req: Request) => MANAGE_ALL_ROLES.includes(req.clinicRole!);
 
-const send = (res: Response, status: number, code: string, message: string) =>
+export const send = (res: Response, status: number, code: string, message: string) =>
   res.status(status).json({ error: { code, message } });
 
-const notFound = (res: Response) =>
+export const notFound = (res: Response) =>
   send(res, 404, "APPOINTMENT_NOT_FOUND", "Esta cita no existe en tu clínica");
 
 // [{ patientId } | { firstName, lastName, email? }]: a ficha, or both names
@@ -82,7 +82,7 @@ function parsePatients(value: unknown): PatientInput[] | null {
 type Names = { firstName: string; lastName: string };
 
 // The fichas the patients point at, by id. null if one isn't this clinic's
-async function loadFichas(clinicId: string, patients: PatientInput[]) {
+export async function loadFichas(clinicId: string, patients: PatientInput[]) {
   const ids = patients.flatMap((p) => ("patientId" in p ? [p.patientId] : []));
   const fichas = new Map<string, Names>();
   if (ids.length === 0) return fichas;
@@ -99,7 +99,7 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 // Saves an appointment's patients. Those with a ficha are linked to it, and its
 // names are copied to the appointment too (they stay if the ficha is deleted).
 // Those sent by name are saved as written, without ficha
-async function insertAppointmentPatients(
+export async function insertAppointmentPatients(
   tx: Tx,
   ids: { clinicId: string; appointmentId: string },
   patients: PatientInput[],
@@ -373,7 +373,7 @@ async function loadAppointments(
 
 // Always called after the service was checked to be this clinic's; the clinic
 // filter is a second lock
-async function serviceDuration(clinicId: string, serviceId: string) {
+export async function serviceDuration(clinicId: string, serviceId: string) {
   const [svc] = await db
     .select({ durationMinutes: service.durationMinutes })
     .from(service)
@@ -788,8 +788,8 @@ async function isClassSession(seriesId: string | null) {
 }
 
 // Longest series: half a year, at most 100 appointments
-const MAX_SERIES_DAYS = 183;
-const MAX_SERIES_APPOINTMENTS = 100;
+export const MAX_SERIES_DAYS = 183;
+export const MAX_SERIES_APPOINTMENTS = 100;
 
 type SeriesInput = {
   serviceId: string;
@@ -999,7 +999,9 @@ export const updateSeries = async (req: Request<{ seriesId: string }>, res: Resp
   const [series] = await db
     .select()
     .from(appointmentSeries)
-    .where(and(eq(appointmentSeries.id, seriesId), eq(appointmentSeries.organizationId, clinicId)));
+    .where(
+      and(eq(appointmentSeries.id, seriesId), eq(appointmentSeries.organizationId, clinicId), isNull(appointmentSeries.deletedAt)),
+    );
   if (!series) return notFound(res);
 
   // From which appointment ("following"), or from now ("all": past ones stay)
@@ -1239,10 +1241,10 @@ async function checkClassDays(clinicId: string, input: ClassInput, from = input.
 }
 
 // The members of a class who go on a given day
-const membersOn = (members: (typeof seriesMember.$inferSelect)[], date: string) =>
+export const membersOn = (members: (typeof seriesMember.$inferSelect)[], date: string) =>
   members.filter((m) => m.fromDate <= date && (!m.toDate || m.toDate >= date));
 
-const memberAsPatient = (m: typeof seriesMember.$inferSelect): PatientInput =>
+export const memberAsPatient = (m: typeof seriesMember.$inferSelect): PatientInput =>
   m.patientId ? { patientId: m.patientId } : { firstName: m.firstName, lastName: m.lastName, contactEmail: m.contactEmail };
 
 // Creates the sessions of a class on the given days, with its members
@@ -1377,7 +1379,13 @@ export const listClasses = async (req: Request, res: Response) => {
     .innerJoin(service, eq(appointmentSeries.serviceId, service.id))
     .innerJoin(room, eq(appointmentSeries.roomId, room.id))
     .leftJoin(user, eq(appointmentSeries.physioId, user.id))
-    .where(and(eq(appointmentSeries.organizationId, clinicId), eq(appointmentSeries.kind, "class")))
+    .where(
+      and(
+        eq(appointmentSeries.organizationId, clinicId),
+        eq(appointmentSeries.kind, "class"),
+        isNull(appointmentSeries.deletedAt),
+      ),
+    )
     .orderBy(asc(appointmentSeries.startTime));
   if (rows.length === 0) return res.json({ classes: [] });
   const ids = rows.map((r) => r.series.id);
@@ -1439,7 +1447,7 @@ export const listClasses = async (req: Request, res: Response) => {
   });
 };
 
-async function loadClass(req: Request<{ classId: string }>) {
+export async function loadClass(req: Request<{ classId: string }>) {
   if (!UUID_PATTERN.test(req.params.classId)) return null;
   const [found] = await db
     .select()
@@ -1449,6 +1457,7 @@ async function loadClass(req: Request<{ classId: string }>) {
         eq(appointmentSeries.id, req.params.classId),
         eq(appointmentSeries.organizationId, req.clinicId!),
         eq(appointmentSeries.kind, "class"),
+        isNull(appointmentSeries.deletedAt),
       ),
     );
   return found ?? null;

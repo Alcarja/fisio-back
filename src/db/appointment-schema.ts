@@ -138,6 +138,10 @@ export const appointmentSeries = pgTable(
     startTime: text("start_time").notNull(),
     startsOn: date("starts_on").notNull(),
     endsOn: date("ends_on").notNull(),
+    // Clase eliminada (Clases → Eliminar clase): ya no se lista ni se puede
+    // tocar. Sus sesiones pasadas y la de hoy se quedan (historial, Cobros)
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedBy: text("deleted_by").references(() => user.id, { onDelete: "set null" }),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },

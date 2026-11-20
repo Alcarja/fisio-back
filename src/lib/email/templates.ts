@@ -344,6 +344,62 @@ function appointmentReminder(data: AppointmentReminderData): RenderedEmail {
   };
 }
 
+// ---------- A class changed or was cancelled (to each of its students) ----------
+
+export type ClassChangedData = {
+  firstName: string;
+  clinicName: string;
+  serviceName: string;
+  // Already written for people: "martes, 24 de noviembre, 19:00"
+  cancelled: string[];
+  // "martes, 24 de noviembre: ahora a las 19:30"
+  moved: string[];
+  // New sessions they've been added to: "miércoles, 25 de noviembre, 19:00"
+  added: string[];
+  // The clinic's own words, if it wrote any
+  message: string | null;
+};
+
+// Long lists are cut: the first ones and "y N más"
+const capList = (items: string[], max = 10) =>
+  items.length > max ? [...items.slice(0, max), `y ${items.length - max} más`] : items;
+
+function classChanged(data: ClassChangedData): RenderedEmail {
+  const onlyCancelled = data.moved.length === 0 && data.added.length === 0;
+  const subject = onlyCancelled
+    ? data.cancelled.length === 1
+      ? `Sesión cancelada: ${data.serviceName} en ${data.clinicName}`
+      : `Sesiones canceladas: ${data.serviceName} en ${data.clinicName}`
+    : `Cambios en tu clase de ${data.serviceName} en ${data.clinicName}`;
+  const sections: [string, string[]][] = [
+    [data.cancelled.length === 1 ? "Se cancela esta sesión:" : "Se cancelan estas sesiones:", capList(data.cancelled)],
+    [data.moved.length === 1 ? "Cambia la hora de esta sesión:" : "Cambia la hora de estas sesiones:", capList(data.moved)],
+    [data.added.length === 1 ? "Tienes una sesión nueva:" : "Tienes estas sesiones nuevas:", capList(data.added)],
+  ].filter(([, list]) => list.length > 0) as [string, string[]][];
+  const closing = "Si tienes cualquier duda, responde a este email o llama a la clínica.";
+
+  return {
+    subject,
+    html: renderLayout({
+      preheader: onlyCancelled ? `${data.serviceName}: ${data.cancelled[0]}` : `Cambios en ${data.serviceName}`,
+      heading: onlyCancelled ? `Hola, ${data.firstName}` : `Cambios en tu clase, ${data.firstName}`,
+      paragraphs: [
+        `Te escribimos de <strong>${e(data.clinicName)}</strong> por tu clase de <strong>${e(data.serviceName)}</strong>.`,
+        ...sections.map(([title, list]) => `<strong>${e(title)}</strong><br>${list.map(e).join("<br>")}`),
+        ...(data.message ? [e(data.message).replace(/\n/g, "<br>")] : []),
+        e(closing),
+      ],
+    }),
+    text: renderText([
+      `Hola, ${data.firstName}:`,
+      `Te escribimos de ${data.clinicName} por tu clase de ${data.serviceName}.`,
+      ...sections.map(([title, list]) => [title, ...list].join("\n")),
+      ...(data.message ? [data.message] : []),
+      closing,
+    ]),
+  };
+}
+
 // ---------- Own domains (Mi web → Dominio) ----------
 
 export type DomainData = { name: string; clinicName: string; domain: string; url: string };
@@ -422,4 +478,5 @@ export const templates = {
   bookingConfirmation,
   bookingNotice,
   appointmentReminder,
+  classChanged,
 };

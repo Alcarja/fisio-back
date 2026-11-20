@@ -1,3 +1,4 @@
+import { applyClassEdit, previewClassEdit } from "../controllers/classEdit.controller.js";
 import { Router } from "express";
 import {
   addClassMember,
@@ -55,6 +56,9 @@ router.post("/classes", ...placeWriters, createClass);
 router.post("/classes/:classId/members", ...placeWriters, addClassMember);
 router.post("/classes/:classId/members/:memberId/leave", ...clinicStaff, removeClassMember);
 router.post("/classes/:classId/extend", ...placeWriters, extendClass);
+// Edit or delete a class from tomorrow on, with a preview first
+router.post("/classes/:classId/edit/preview", ...clinicStaff, previewClassEdit);
+router.post("/classes/:classId/edit", ...placeWriters, applyClassEdit);
 // Taking attendance in a group session, patient by patient
 router.patch("/appointments/:appointmentId/attendance", ...clinicStaff, setAttendance);
 // Link a patient without ficha (an online booking) to a ficha, keeping the row

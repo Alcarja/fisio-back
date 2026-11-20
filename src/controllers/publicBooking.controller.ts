@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { Request, Response } from "express";
-import { and, asc, eq, gte, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   appointment,
@@ -689,6 +689,9 @@ async function loadClassSessions(clinic: BookableClinic, filter: { serviceId?: s
       and(
         eq(appointment.organizationId, clinic.id),
         eq(appointmentSeries.kind, "class"),
+        // A deleted class keeps today's session for those already in it,
+        // but it's no longer offered online
+        isNull(appointmentSeries.deletedAt),
         inArray(appointment.status, ["booked", "confirmed"]),
         eq(service.isActive, true),
         eq(service.isGroup, true),
