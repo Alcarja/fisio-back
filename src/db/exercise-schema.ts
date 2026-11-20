@@ -62,6 +62,9 @@ export const exercise = pgTable(
     // Pasos, uno por línea
     instructions: text("instructions").notNull(),
     precautions: text("precautions"),
+    // Enlace a un vídeo de YouTube (solo el enlace: no se incrusta). Se copia
+    // a las tablas y programas, donde se puede cambiar
+    videoUrl: text("video_url"),
     // Dosis por defecto. Repeticiones o segundos (isométricos, estiramientos)
     defaultSets: integer("default_sets"),
     defaultReps: integer("default_reps"),
@@ -126,6 +129,8 @@ export const exerciseTemplateItem = pgTable(
       .notNull()
       .references(() => exercise.id, { onDelete: "cascade" }),
     notes: text("notes"),
+    // Copiado del banco al añadirlo; se puede cambiar en la tabla
+    videoUrl: text("video_url"),
     ...doseColumns,
   },
   (table) => [index("exercise_template_item_template_idx").on(table.templateId)],
@@ -189,6 +194,8 @@ export const exerciseProgramItem = pgTable(
     precautions: text("precautions"),
     // Indicación para este paciente en este ejercicio
     notes: encryptedText("notes"),
+    // Vídeo de YouTube que ve el paciente (enlace, no incrustado)
+    videoUrl: text("video_url"),
     ...doseColumns,
   },
   (table) => [index("exercise_program_item_program_idx").on(table.programId)],

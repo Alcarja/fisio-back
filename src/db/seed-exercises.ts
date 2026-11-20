@@ -1,4 +1,6 @@
 import { sql } from "drizzle-orm";
+import { parseVideoUrl } from "../lib/exercises.js";
+import { BASE_EXERCISE_VIDEOS } from "./base-exercise-videos.js";
 import { BASE_EXERCISES } from "./base-exercises.js";
 import { db, pool } from "./index.js";
 import { exercise } from "./schema.js";
@@ -9,6 +11,13 @@ import { exercise } from "./schema.js";
 // exercises (and their copies of base ones) aren't touched.
 
 async function main() {
+  // Every video belongs to an exercise of the bank, and is a valid YouTube link
+  const keys = new Set(BASE_EXERCISES.map((e) => e.key));
+  for (const [key, url] of Object.entries(BASE_EXERCISE_VIDEOS)) {
+    if (!keys.has(key)) throw new Error(`base-exercise-videos.ts: "${key}" isn't an exercise of the bank`);
+    const parsed = parseVideoUrl(url);
+    if (typeof parsed === "string" || parsed.url !== url) throw new Error(`base-exercise-videos.ts: "${key}" has a bad link`);
+  }
   let count = 0;
   for (const e of BASE_EXERCISES) {
     const values = {
@@ -20,6 +29,7 @@ async function main() {
       equipment: e.equipment,
       instructions: e.instructions,
       precautions: e.precautions ?? null,
+      videoUrl: BASE_EXERCISE_VIDEOS[e.key] ?? null,
       defaultSets: e.sets ?? null,
       defaultReps: e.reps ?? null,
       defaultSeconds: e.seconds ?? null,

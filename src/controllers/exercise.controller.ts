@@ -26,6 +26,7 @@ const exerciseColumns = {
   equipment: exercise.equipment,
   instructions: exercise.instructions,
   precautions: exercise.precautions,
+  videoUrl: exercise.videoUrl,
   defaultSets: exercise.defaultSets,
   defaultReps: exercise.defaultReps,
   defaultSeconds: exercise.defaultSeconds,
@@ -196,6 +197,7 @@ const templateItemColumns = {
   restSeconds: exerciseTemplateItem.restSeconds,
   perSide: exerciseTemplateItem.perSide,
   notes: exerciseTemplateItem.notes,
+  videoUrl: exerciseTemplateItem.videoUrl,
   position: exerciseTemplateItem.position,
 };
 
@@ -246,11 +248,16 @@ async function parseTemplate(clinicId: string, body: Record<string, unknown>) {
   const ids = [...new Set(items.map((i) => i.exerciseId))];
   if (!ids.every((id) => UUID_PATTERN.test(id))) return "Algún ejercicio no es válido";
   const found = await db
-    .select({ id: exercise.id })
+    .select({ id: exercise.id, videoUrl: exercise.videoUrl })
     .from(exercise)
     .where(and(inArray(exercise.id, ids), visibleTo(clinicId), eq(exercise.archived, false)));
   if (found.length !== ids.length) return "Algún ejercicio ya no está en el banco";
-  return { fields: { name, frequency, notes } as TemplateFields, items };
+  // Without a link of its own, an item takes the exercise's
+  const videoOf = new Map(found.map((f) => [f.id, f.videoUrl]));
+  return {
+    fields: { name, frequency, notes } as TemplateFields,
+    items: items.map((i) => ({ ...i, videoUrl: i.videoUrl !== undefined ? i.videoUrl : (videoOf.get(i.exerciseId) ?? null) })),
+  };
 }
 
 // POST /clinic/exercise-templates -> 201 { templateId }

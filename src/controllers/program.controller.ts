@@ -37,6 +37,7 @@ const itemColumns = {
   instructions: exerciseProgramItem.instructions,
   precautions: exerciseProgramItem.precautions,
   notes: exerciseProgramItem.notes,
+  videoUrl: exerciseProgramItem.videoUrl,
   sets: exerciseProgramItem.sets,
   reps: exerciseProgramItem.reps,
   seconds: exerciseProgramItem.seconds,
@@ -132,6 +133,7 @@ async function parseProgram(clinicId: string, body: Record<string, unknown>, kee
       name: exercise.name,
       instructions: exercise.instructions,
       precautions: exercise.precautions,
+      videoUrl: exercise.videoUrl,
       archived: exercise.archived,
     })
     .from(exercise)
@@ -150,6 +152,8 @@ async function parseProgram(clinicId: string, body: Record<string, unknown>, kee
         name: source.name,
         instructions: source.instructions,
         precautions: source.precautions,
+        // Its own link, or the exercise's
+        videoUrl: item.videoUrl !== undefined ? item.videoUrl : source.videoUrl,
       };
     }),
   };
@@ -292,7 +296,8 @@ export const updateProgram = async (req: Request<ProgramParams>, res: Response) 
   const before = { frequency: found.frequency, notes: found.notes, items: itemsSummary(currentItems) };
   const after = { ...parsed.fields, items: itemsSummary(parsed.items) };
   const itemNotesChanged =
-    JSON.stringify(currentItems.map((i) => i.notes)) !== JSON.stringify(parsed.items.map((i) => i.notes));
+    JSON.stringify(currentItems.map((i) => [i.notes, i.videoUrl])) !==
+    JSON.stringify(parsed.items.map((i) => [i.notes, i.videoUrl]));
   const { changed, previous } = changedFrom(before, after);
   if (itemNotesChanged && !("items" in changed)) {
     changed.items = after.items;

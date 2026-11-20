@@ -34,6 +34,7 @@ export const LIMITS = {
   precautions: 1000,
   notes: 1000,
   frequency: 200,
+  videoUrl: 300,
   itemsPerList: 40,
 };
 
@@ -77,6 +78,42 @@ export function optionalText(value: unknown, max: number): string | null | undef
   return text || null;
 }
 
+// A YouTube video link -> its clean https address, null if empty, or a string
+// with what's wrong. Only YouTube (youtube.com, m.youtube.com, youtu.be), so a
+// typo or another site never reaches a patient. Keeps the start time (?t=)
+const YOUTUBE_ID = /^[\w-]{6,20}$/;
+export function parseVideoUrl(value: unknown): { url: string | null } | string {
+  const wrong = "El vídeo tiene que ser un enlace de YouTube (youtube.com o youtu.be)";
+  if (value === null || value === undefined) return { url: null };
+  if (typeof value !== "string") return wrong;
+  const raw = value.trim();
+  if (!raw) return { url: null };
+  if (raw.length > LIMITS.videoUrl) return wrong;
+  let u: URL;
+  try {
+    u = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+  } catch {
+    return wrong;
+  }
+  const host = u.hostname.toLowerCase().replace(/^www\.|^m\./, "");
+  const parts = u.pathname.split("/").filter(Boolean);
+  let id: string | undefined;
+  let shorts = false;
+  if (host === "youtu.be") id = parts[0];
+  else if (host === "youtube.com") {
+    if (parts[0] === "watch") id = u.searchParams.get("v") ?? undefined;
+    else if (["shorts", "embed", "live"].includes(parts[0] ?? "")) {
+      id = parts[1];
+      shorts = parts[0] === "shorts";
+    }
+  } else return wrong;
+  if (!id || !YOUTUBE_ID.test(id)) return wrong;
+  if (shorts) return { url: `https://www.youtube.com/shorts/${id}` };
+  const t = u.searchParams.get("t") ?? u.searchParams.get("start");
+  const start = t && /^\d+s?$|^(\d+h)?(\d+m)?(\d+s)?$/.test(t) ? `&t=${t}` : "";
+  return { url: `https://www.youtube.com/watch?v=${id}${start}` };
+}
+
 export type ExerciseFields = {
   name: string;
   bodyRegions: string[];
@@ -84,6 +121,7 @@ export type ExerciseFields = {
   equipment: string[];
   instructions: string;
   precautions: string | null;
+  videoUrl: string | null;
   defaultSets: number | null;
   defaultReps: number | null;
   defaultSeconds: number | null;
@@ -108,6 +146,8 @@ export function parseExercise(body: Record<string, unknown>): ExerciseFields | s
   if (!instructions) return `Escribe cómo se hace (máximo ${LIMITS.instructions} caracteres)`;
   const precautions = optionalText(body.precautions, LIMITS.precautions);
   if (precautions === undefined) return `Las precauciones admiten ${LIMITS.precautions} caracteres`;
+  const video = parseVideoUrl(body.videoUrl);
+  if (typeof video === "string") return video;
   const dose = parseDose(body, "default");
   if (typeof dose === "string") return dose;
 
@@ -118,6 +158,7 @@ export function parseExercise(body: Record<string, unknown>): ExerciseFields | s
     equipment: equipment.length ? [...new Set(equipment as string[])] : ["none"],
     instructions,
     precautions,
+    videoUrl: video.url,
     defaultSets: dose.sets,
     defaultReps: dose.reps,
     defaultSeconds: dose.seconds,
@@ -126,7 +167,8 @@ export function parseExercise(body: Record<string, unknown>): ExerciseFields | s
   };
 }
 
-export type ListItem = Dose & { exerciseId: string; notes: string | null };
+// videoUrl: undefined = take the bank's (the exercise's own link)
+export type ListItem = Dose & { exerciseId: string; notes: string | null; videoUrl?: string | null };
 
 // The exercises of a tabla or a program: [{ exerciseId, sets, reps…, notes }]
 export function parseItems(value: unknown): ListItem[] | string {
@@ -140,7 +182,13 @@ export function parseItems(value: unknown): ListItem[] | string {
     if (typeof dose === "string") return dose;
     const notes = optionalText(item.notes, LIMITS.notes);
     if (notes === undefined) return `Las indicaciones admiten ${LIMITS.notes} caracteres`;
-    items.push({ exerciseId: item.exerciseId, notes, ...dose });
+    let videoUrl: string | null | undefined;
+    if (item.videoUrl !== undefined) {
+      const video = parseVideoUrl(item.videoUrl);
+      if (typeof video === "string") return video;
+      videoUrl = video.url;
+    }
+    items.push({ exerciseId: item.exerciseId, notes, ...dose, ...(videoUrl !== undefined ? { videoUrl } : {}) });
   }
   return items;
 }
