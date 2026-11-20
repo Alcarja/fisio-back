@@ -55,7 +55,27 @@ export const SITE_TEMPLATES: readonly SiteTemplate[] = [
     label: "Norte",
     description:
       "Moderna y directa: paneles redondeados, precios a la vista y reserva siempre a mano. Para clínicas con un enfoque profesional.",
-    // Private until it's offered to everyone: only clinics with customTemplate = "norte"
+    public: true,
+  },
+  {
+    key: "arco",
+    label: "Arco",
+    description:
+      "Clara y con método: titulares grandes, un medidor de grados en portada y tu segundo color como acento. Para clínicas que trabajan con objetivos medibles.",
+    public: true,
+  },
+  {
+    key: "zona",
+    label: "Zona",
+    description:
+      "Editorial y directa: empieza preguntando «¿Dónde te duele?» y deja elegir una zona del cuerpo. Blanco, negro y tu color, con titulares muy gruesos y secciones numeradas.",
+    public: true,
+  },
+  {
+    key: "calma",
+    label: "Calma",
+    description:
+      "Seria, tranquila y cercana: mucho blanco, tu color como principal y la cita siempre a mano, con barra de llamada en el móvil. Para clínicas que quieren transmitir confianza.",
     public: true,
   },
 ];

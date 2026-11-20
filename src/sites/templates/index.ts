@@ -23,6 +23,18 @@ import ZenHome from "./zen/Home.js";
 import ZenLayout from "./zen/Layout.js";
 import * as zenPages from "./zen/pages.js";
 import zenCss from "./zen/style.js";
+import ArcoHome from "./arco/Home.js";
+import ArcoLayout from "./arco/Layout.js";
+import * as arcoPages from "./arco/pages.js";
+import arcoCss from "./arco/style.js";
+import ZonaHome from "./zona/Home.js";
+import ZonaLayout from "./zona/Layout.js";
+import * as zonaPages from "./zona/pages.js";
+import zonaCss from "./zona/style.js";
+import CalmaHome from "./calma/Home.js";
+import CalmaLayout from "./calma/Layout.js";
+import * as calmaPages from "./calma/pages.js";
+import calmaCss from "./calma/style.js";
 
 // Template key (lib/siteTemplates.ts) → its design. A key without a design
 // falls back to Clara, so a clinic always gets a working site.
@@ -45,6 +57,9 @@ const TEMPLATES: Record<string, SiteTemplateModule> = {
   pulso: { Layout: PulsoLayout, Home: PulsoHome, pages: pagesOf(pulsoPages), css: pulsoCss },
   norte: { Layout: NorteLayout, Home: NorteHome, pages: pagesOf(nortePages), css: norteCss },
   zen: { Layout: ZenLayout, Home: ZenHome, pages: pagesOf(zenPages), css: zenCss },
+  arco: { Layout: ArcoLayout, Home: ArcoHome, pages: pagesOf(arcoPages), css: arcoCss },
+  zona: { Layout: ZonaLayout, Home: ZonaHome, pages: pagesOf(zonaPages), css: zonaCss },
+  calma: { Layout: CalmaLayout, Home: CalmaHome, pages: pagesOf(calmaPages), css: calmaCss },
 };
 
 export const getTemplate = (key: string): SiteTemplateModule => TEMPLATES[key] ?? clara;

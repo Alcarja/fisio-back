@@ -28,6 +28,25 @@ export function hoursByDay(hours: SiteHours[]) {
   }));
 }
 
+const DAY_ABBR = ["L", "M", "X", "J", "V", "Sáb.", "Dom."];
+
+// Days with the same times grouped: ["L–V 09:00–14:00 · 16:00–20:00", "Sáb. 10:00–14:00"]
+export function hoursSummary(hours: SiteHours[]) {
+  const days = hoursByDay(hours).map((d) => d.ranges.join(" · "));
+  const out: string[] = [];
+  for (let i = 0; i < 7; ) {
+    if (!days[i]) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j + 1 < 7 && days[j + 1] === days[i]) j++;
+    out.push(`${i === j ? DAY_ABBR[i] : `${DAY_ABBR[i]}–${DAY_ABBR[j]}`} ${days[i]}`);
+    i = j + 1;
+  }
+  return out;
+}
+
 // Plain text → paragraphs (one per line break)
 export const paragraphs = (text: string | undefined) =>
   (text ?? "")
